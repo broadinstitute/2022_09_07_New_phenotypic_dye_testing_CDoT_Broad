@@ -1,0 +1,4 @@
+[core]
+    remote = s3storage
+['remote "s3storage"']
+    url = s3://imaging-platform-ssf/projects/2022_09_07_New_phenotypic_dye_testing_CDoT_Broad/workspace/software/2022_09_07_New_phenotypic_dye_testing_CDoT_Broad_DVC
