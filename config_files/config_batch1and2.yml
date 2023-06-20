@@ -19,9 +19,9 @@ annotate:
   perform: true
   well_column: Metadata_Well
   external :
-    perform: true
-    file: JUMP-MOA_compound_metadata.tsv
-    merge_column: broad_sample
+    perform: false
+    file: <metadata file name>
+    merge_column: <Column to merge on>
 normalize:
   perform: true
   method: mad_robustize
