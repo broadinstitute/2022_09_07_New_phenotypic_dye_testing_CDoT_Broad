@@ -1,0 +1,20 @@
+#+title: Pipeline
+Fetch the data and run the command-based CellProfiler analyses
+
+#+begin_src fish
+set BUCKET "imaging-platform"
+set PROJECT_NAME "2022_09_07_New_phenotypic_dye_testing_CDoT_Broad"
+set BATCH_ID "2023_09_22_batch7"
+set CPG_IDENTIFIER "chromalive_pilot"
+
+# mount_smbfs //hydrogen/imaging_analysis /volumes/imaging_analysis
+
+for i in (find '/Volumes/imaging_analysis/2022_09_07_New_phenotypic_dye_testing_CDoT_Broad/Phenix 2 - Live Timepoints' -maxdepth 1 -type d | grep '3$' | grep -v 2245); echo $i;
+aws s3 sync "$i" "s3://$BUCKET/projects/$PROJECT_NAME/$BATCH_ID/images/$(basename $i | sed 's/\ //g' | sed 's/\-/_/g')"; end
+
+#+end_src
+
+#+RESULTS:
+
+
+find '/Volumes/imaging_analysis/2022_09_07_New_phenotypic_dye_testing_CDoT_Broad/Phenix 2 - Live Timepoints' -maxdepth 1 -type d
