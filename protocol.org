@@ -8,33 +8,110 @@ Analysis starting after the producion of illum files (all previous steps were pe
 :PROPERTIES:
 :header-args:shell: :session *main* :results output silent :exports code
 :END:
-** Create instances
-#+begin_src shell
+** Set variables
+User variables
+#+begin_src fish
+set USER "ALAN" # for Instance names
+set USERNAME "amunozgo" # For tags
+set KEY "amunozgo_cimini" # Access key created on aws
+#+end_src
 
-function get-instance-id
+#+RESULTS:
+
+Project variables
+#+begin_src shell
+set AWS_PROFILE "--profile imaging-platform" #Leave empty if only using one profile
+set BUCKET "imaging-platform-ssf"
+set PROJECT "2022_09_07_New_phenotypic_dye_testing_CDoT_Broad"
+set BATCH "2023_08_02_Batch5"
+#+end_src
+
+Instance variables
+#+begin_src shell
+set DCP_NAME "$USER"_DCP
+set BACKEND_NAME "$USER"_Backend
+# set ASSAYDEV_NAME "$USER"_Windows
+set ASSAYDEV_NAME Alan_Windows # TODO return this to usual once it is done
+#+end_src
+** Helper functions
+These will make the code below shorter. The only dependencies are aws, jq, and some basic command line tools: sed, awk, tr.
+
+Get instance id from STDIN
+#+begin_src shell
+function get_instance_id
 cat - | jq '."Instances"| .[] | .InstanceId' | tr -d '"'
 end
+#+end_src
 
-# User for tags
-set USER "ALAN"
-set USERNAME "amunozgo"
-set KEY "amunozgo_cimini"
+Get running instance id for a given name (e.g., ALAN_Backend)
+#+begin_src shell
+function aws_describe_instances
+echo $AWS_PROFILE "describe-instances" | xargs aws ec2
+end
+function get_instance_ids
+# instance_name
+aws_describe_instances | jq '.Reservations |
+         .[] |
+         .Instances |
+         map(select(has("Tags"))) |
+         map(select(.Tags[].Key=="Name" and .Tags[].Value=="'"$argv[1]"'")) |
+         map(select(.State.Name =="running")) |
+         .[] |
+         .InstanceId' | tr -d '"'
+end
+#+end_src
 
-# Instance args
-set INSTANCE_SHARED_ARGS "--profile imaging-platform run-instances --count 1 --key-name $KEY"
-function fill_instance_args
-# suffix instance_type volume_size ami
-echo "$INSTANCE_SHARED_ARGS --instance-type $argv[2] --block-device-mappings [{\\\"DeviceName\\\":\\\"/dev/sdf\\\",\\\"Ebs\\\":{\\\"VolumeSize\\\":$argv[3],\\\"DeleteOnTermination\\\":false}}] --tag-specification ResourceType=instance,Tags=[{Key=User,Value=$USERNAME},{Key=Name,Value="$USER"_$argv[1]}] ResourceType=volume,Tags=[{Key=User,Value=$USERNAME}] --image-id $argv[4]"
+Get availability zone from a given instance name ir ud.
+#+begin_src shell
+function get_value
+# key value output
+aws_describe_instances | jq '.Reservations  |
+          .[] |
+          .Instances |
+         map(select(.State.Name =="running")) |
+         map(select(.Tags[].Key=="'"$argv[1]"'" and .Tags[].Value=="'"$argv[2]"'")) |
+         .[] | '$argv[3] | tr -d '"'
+         # .Placement' | tr -d '"'
 end
 
-set ALARM_SHARED_ARGS '--profile imaging-platform put-metric-alarm --evaluation-periods 6 --comparison-operator LessThanThreshold --datapoints-to-alarm 6 --treat-missing-data notBreaching --statistic Average --period 10 --namespace test'
+function name_to_instance
+# instance_name
+get_value "Name" $argv[1] ".InstanceId"
+end
+
+function name_to_azone
+# instance_id
+get_value "Name" $argv[1] ".Placement.AvailabilityZone"
+end
+
+# Examples
+# get_value "Name" "Alan_Windows" ".Placement.AvailabilityZone"
+# get_instance_id "Alan_Windows"
+#+end_src
+
+** Create instances
+Base variables
+#+begin_src shell
+set INSTANCE_SHARED_ARGS "$AWS_PROFILE run-instances --count 1 --key-name $KEY"
+set ALARM_SHARED_ARGS "$AWS_PROFILE put-metric-alarm --evaluation-periods 6 --comparison-operator LessThanThreshold --datapoints-to-alarm 6 --treat-missing-data notBreaching --statistic Average --period 10 --namespace test"
+#+end_src
+
+Helper funcitons
+#+begin_src shell
+function fill_instance_args
+# suffix instance_type volume_size ami
+echo "$INSTANCE_SHARED_ARGS --instance-type $argv[2] --block-device-mappings [{\\\"DeviceName\\\":\\\"/dev/sdf\\\",\\\"Ebs\\\":{\\\"VolumeSize\\\":$argv[3],\\\"DeleteOnTermination\\\":false}}] --tag-specification ResourceType=instance,Tags=[{Key=User,Value=$USERNAME},{Key=Name,Value=$argv[1]}] ResourceType=volume,Tags=[{Key=User,Value=$USERNAME}] --image-id $argv[4]"
+end
 
 function fill_alarm_args
 #suffix metric threshold
-echo "$ALARM_SHARED_ARGS --alarm-name "$USER"_$argv[1] --metric-name $argv[2] --threshold $argv[3] --dimensions Name=InstanceId,Value="
+echo "$ALARM_SHARED_ARGS --alarm-name $argv[1] --metric-name $argv[2] --threshold $argv[3] --dimensions Name=InstanceId,Value="
 end
+#+end_src
 
-
+Build CLI arguments for instances and their alarms
+#+begin_src shell
+#Instance args
 set DCP_INSTANCE_ARGS (fill_instance_args DCP m4.xlarge 8 ami-0ba60f12d0dc5fdb3)
 set BACKEND_INSTANCE_ARGS (fill_instance_args "Backend" "m4.2xlarge" 30 ami-0ba60f12d0dc5fdb3)
 set ASSAYDEV_INSTANCE_ARGS (fill_instance_args "AssayDev" "m4.xlarge" 30 ami-07b1358971158dc9b)
@@ -43,29 +120,62 @@ set ASSAYDEV_INSTANCE_ARGS (fill_instance_args "AssayDev" "m4.xlarge" 30 ami-07b
 set DCP_ALARM_ARGS (fill_alarm_args DCP NetworkIn 7000)
 set BACKEND_ALARM_ARGS (fill_alarm_args BACKEND CPUUtilization 1)
 set ASSAYDEV_ALARM_ARGS (fill_alarm_args ASSAYDEV CPUUtilization 1)
+#+end_src
 
+Deploy instances and their alarms
+#+begin_src shell
 # DCP
-echo $DCP_INSTANCE_ARGS | xargs aws ec2 | tee DCP.json | get-instance-id | sed -E "s/(.*)/$DCP_ALARM_ARGS\1/" | xargs aws cloudwatch
+
+if test -z (name_to_instance $DCP_NAME)
+echo $DCP_INSTANCE_ARGS | xargs aws ec2 | get-instance-id | sed -E "s/(.*)/$DCP_ALARM_ARGS\1/" | xargs aws cloudwatch;
+end
 
 # BACKEND
-echo $BACKEND_INSTANCE_ARGS | xargs aws ec2 | tee backend.json | get-instance-id | sed -E "s/(.*)/$BACKEND_ALARM_ARGS\1/" | xargs aws cloudwatch
+if test -z (name_to_instance $BACKEND_NAME)
+echo $BACKEND_INSTANCE_ARGS | xargs aws ec2 | tee backend.json | get-instance-id | sed -E "s/(.*)/$BACKEND_ALARM_ARGS\1/" | xargs aws cloudwatch;
+end
 
 # AssayDev
-echo $ASSAYDEV_INSTANCE_ARGS "--subnet-id subnet-0d87ae6d910b8b478 --security-group-ids sg-076139d4acc4b5a3c" | xargs aws ec2 | tee ASSAYDEV.json | get-instance-id | sed -E "s/(.*)/$ASSAYDEV_ALARM_ARGS\1/" | xargs aws cloudwatch
+if test -z (name_to_instance $ASSAYDEV_NAME)
+echo $ASSAYDEV_INSTANCE_ARGS "--subnet-id subnet-0d87ae6d910b8b478 --security-group-ids sg-076139d4acc4b5a3c" | xargs aws ec2 | get-instance-id | sed -E "s/(.*)/$ASSAYDEV_ALARM_ARGS\1/" | xargs aws cloudwatch
+end
 
 #+end_src
 
 #+begin_src shell
-function get_instance_id
-# instance_name
-aws ec2 --profile imaging-platform describe-instances | jq --arg NAME "ALAN_$argv[1]" ".Reservations |
-         .[] | .Instances | map(select(has(\"Tags\"))) |
-         map(select(.Tags[].Key==\"Name\" and .Tags[].Value==\"ALAN_$argv[1])) |
-         map(select(.State.Name ==\"running\")) | .[] | .ImageId" | tr -d '"'
-end
-echo "here"
-echo ( get_instance_id ALAN_DCP)
+# echo (get_instance_id ALAN_DCP)
+# echo (get_instance_id ALAN_AssayDev)
+# echo (get_instance_id ALAN_Backend)
 #+end_src
 
+Now all instances should be deployed.
 
-** Create instances
+** Install Microsoft remote desktop
+#+begin_src fish
+if not type -q microsoft-remote-desktop
+    brew install --cask microsoft-remote-desktop
+end
+#+end_src
+
+#+RESULTS:
+
+- Download the Remote (rdp) file
+Then (sadly) open Microsoft remote desktop manuallt.
+
+** Add storage for batch
+You can check the space needed
+#+begin_src shell
+aws s3 ls $AWS_PROFILE --summarize --human-readable --recursive s3://$BUCKET/projects/$PROJECt/$BATCH/images | tail -n 1
+#+end_src
+- Batch 5: 46.4 GB
+
+*** Create EBS volume
+
+Get availability zone
+#+begin_src shell
+name_to_azone
+#+end_src
+#+begin_src shell
+
+aws ec2 create-volume
+#+end_src
