@@ -1,0 +1,71 @@
+#+title: Protocol
+#+OPTIONS: ^:nil
+#+PROPERTY: HEADER-ARGS+ :eval no-export
+
+Analysis starting after the producion of illum files (all previous steps were performed by Suganya)
+
+* Main
+:PROPERTIES:
+:header-args:shell: :session *main* :results output silent :exports code
+:END:
+** Create instances
+#+begin_src shell
+
+function get-instance-id
+cat - | jq '."Instances"| .[] | .InstanceId' | tr -d '"'
+end
+
+# User for tags
+set USER "ALAN"
+set USERNAME "amunozgo"
+set KEY "amunozgo_cimini"
+
+# Instance args
+set INSTANCE_SHARED_ARGS "--profile imaging-platform run-instances --count 1 --key-name $KEY"
+function fill_instance_args
+# suffix instance_type volume_size ami
+echo "$INSTANCE_SHARED_ARGS --instance-type $argv[2] --block-device-mappings [{\\\"DeviceName\\\":\\\"/dev/sdf\\\",\\\"Ebs\\\":{\\\"VolumeSize\\\":$argv[3],\\\"DeleteOnTermination\\\":false}}] --tag-specification ResourceType=instance,Tags=[{Key=User,Value=$USERNAME},{Key=Name,Value="$USER"_$argv[1]}] ResourceType=volume,Tags=[{Key=User,Value=$USERNAME}] --image-id $argv[4]"
+end
+
+set ALARM_SHARED_ARGS '--profile imaging-platform put-metric-alarm --evaluation-periods 6 --comparison-operator LessThanThreshold --datapoints-to-alarm 6 --treat-missing-data notBreaching --statistic Average --period 10 --namespace test'
+
+function fill_alarm_args
+#suffix metric threshold
+echo "$ALARM_SHARED_ARGS --alarm-name "$USER"_$argv[1] --metric-name $argv[2] --threshold $argv[3] --dimensions Name=InstanceId,Value="
+end
+
+
+set DCP_INSTANCE_ARGS (fill_instance_args DCP m4.xlarge 8 ami-0ba60f12d0dc5fdb3)
+set BACKEND_INSTANCE_ARGS (fill_instance_args "Backend" "m4.2xlarge" 30 ami-0ba60f12d0dc5fdb3)
+set ASSAYDEV_INSTANCE_ARGS (fill_instance_args "AssayDev" "m4.xlarge" 30 ami-07b1358971158dc9b)
+
+# Alarm args
+set DCP_ALARM_ARGS (fill_alarm_args DCP NetworkIn 7000)
+set BACKEND_ALARM_ARGS (fill_alarm_args BACKEND CPUUtilization 1)
+set ASSAYDEV_ALARM_ARGS (fill_alarm_args ASSAYDEV CPUUtilization 1)
+
+# DCP
+echo $DCP_INSTANCE_ARGS | xargs aws ec2 | tee DCP.json | get-instance-id | sed -E "s/(.*)/$DCP_ALARM_ARGS\1/" | xargs aws cloudwatch
+
+# BACKEND
+echo $BACKEND_INSTANCE_ARGS | xargs aws ec2 | tee backend.json | get-instance-id | sed -E "s/(.*)/$BACKEND_ALARM_ARGS\1/" | xargs aws cloudwatch
+
+# AssayDev
+echo $ASSAYDEV_INSTANCE_ARGS "--subnet-id subnet-0d87ae6d910b8b478 --security-group-ids sg-076139d4acc4b5a3c" | xargs aws ec2 | tee ASSAYDEV.json | get-instance-id | sed -E "s/(.*)/$ASSAYDEV_ALARM_ARGS\1/" | xargs aws cloudwatch
+
+#+end_src
+
+#+begin_src shell
+function get_instance_id
+# instance_name
+aws ec2 --profile imaging-platform describe-instances | jq --arg NAME "ALAN_$argv[1]" ".Reservations |
+         .[] | .Instances | map(select(has(\"Tags\"))) |
+         map(select(.Tags[].Key==\"Name\" and .Tags[].Value==\"ALAN_$argv[1])) |
+         map(select(.State.Name ==\"running\")) | .[] | .ImageId" | tr -d '"'
+end
+echo "here"
+echo ( get_instance_id ALAN_DCP)
+#+end_src
+
+
+** Create instances
