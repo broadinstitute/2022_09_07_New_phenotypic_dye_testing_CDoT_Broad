@@ -121,7 +121,8 @@ end
 Build CLI arguments for instances and their alarms
 #+begin_src shell
 #Instance args
-set DCP_INSTANCE_ARGS (fill_instance_args $DCP_NAME m4.xlarge 8 ami-0ba60f12d0dc5fdb3)
+# set DCP_INSTANCE_ARGS (fill_instance_args $DCP_NAME m4.xlarge 8 ami-0ba60f12d0dc5fdb3)
+set DCP_INSTANCE_ARGS (fill_instance_args $DCP_NAME m4.xlarge 8 ami-0327bde68dc27cba8)
 set BACKEND_INSTANCE_ARGS (fill_instance_args $BACKEND_NAME m4.2xlarge 30 ami-0ba60f12d0dc5fdb3)
 set ASSAYDEV_INSTANCE_ARGS (fill_instance_args $ASSAYDEV_NAME m4.xlarge $EBS_SIZE ami-07b1358971158dc9b)
 
@@ -134,14 +135,14 @@ set ASSAYDEV_ALARM_ARGS (fill_alarm_args $ASSAYDEV_NAME CPUUtilization 1)
 Deploy instances and their alarms
 #+begin_src shell
 # DCP
-
 if test -z (name_to_instance $DCP_NAME)
-echo $DCP_INSTANCE_ARGS | xargs aws ec2 | get_instance_id | sed -E "s/(.*)/$DCP_ALARM_ARGS\1/" | xargs aws cloudwatch;
+echo $DCP_INSTANCE_ARGS "--security-group-ids sg-039079dd69ae4371a" | xargs aws ec2 | get_instance_id | sed -E "s/(.*)/$DCP_ALARM_ARGS\1/" | xargs aws cloudwatch;
 end
 
 # BACKEND
 if test -z (name_to_instance $BACKEND_NAME)
-echo $BACKEND_INSTANCE_ARGS | xargs aws ec2 | tee backend.json | get_instance_id | sed -E "s/(.*)/$BACKEND_ALARM_ARGS\1/" | xargs aws cloudwatch;
+echo $BACKEND_INSTANCE_ARGS "--security-group-ids sg-039079dd69ae4371a" | xargs aws ec2 | tee backend.json | get_instance_id | sed -E "s/(.*)/$BACKEND_ALARM_ARGS\1/" | xargs aws cloudwatch;
+
 end
 
 # AssayDev
@@ -155,6 +156,12 @@ aws_describe_instances | jq '.Reservations  |
           .[] |
           .Instances |
          map(select(.State.Name =="running")) | map(select(.Tags[].Key=="Name" and .Tags[].Value=="'$argv[1]'")) | .[] | .PublicDnsName' | tr -d '"'
+end
+
+function term_instance
+# instance_id
+# Example: term_instance (name_to_instance INSTANCE-NAME)
+echo $AWS_PROFILE "terminate-instances --instance-ids $argv[1]" | xargs aws ec2
 end
 #+end_src
 
@@ -219,11 +226,27 @@ sed -i 's/\//\\/g' load_data_with_illum.csv
 **** Upload to aws
 #+begin_src shell
 echo "aws s3 cp D:\\\pipelines\\\\"$BATCH"\\\assaydev.cppipe s3://$BUCKET/projects/$PROJECT/workspace/pipelines/$BATCH/assaydev.cppipe"
-
 #+end_src
 
 *** Run DevAssay
 **** Configure Distributed Cell Profiler.
+#+begin_src shell
+ssh-add "~/.ssh/$KEY".pem
+set REMOTE_ADDRESS ( ssh dns_from_name $DCP_NAME )
+scp .ssh/amunozgo_cimini.pem ubuntu@$REMOTE_ADDRESS:/home/ubuntu/.ssh/
+
+ssh ubuntu@$REMOTE_ADDRESS
+
+# On the running DCP instance
+cd ~/efs/$PROJECT/workspace/software/Distributed-CellProfiler
+sed -Ei "s/^APP_NAME = .*/APP_NAME = '$PROJECT\_AssayDev'/" config.py
+sed -Ei "s/^SSH_KEY_NAME = .*/SSH_KEY_NAME = '$KEY.pem'/" config.py
+sed -Ei "s/^CLUSTER_MACHINES = .*/CLUSTER_MACHINES = 100/" config.py
+sed -Ei "s/^SQS_MESSAGE_VISIBILITY = .*/SQS_MESSAGE_VISIBILITY = 10 * 60/" config.py
+sed -Ei "s/^EXPECTED_NUMBER_FILES = .*/EXPECTED_NUMBER_FILES = 1/" config.py
+sed -Ei "s/^SQS_DEAD_LETTER_QUEUE = .*/SQS_DEAD_LETTER_QUEUE = '$USER\_DeadMessages'/" config.py
+
+#+end_src
 **** Configure Batch File
 **** Run segmentation for a subset of the data
 **** Stitch images into one
