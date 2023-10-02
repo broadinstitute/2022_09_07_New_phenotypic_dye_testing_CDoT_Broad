@@ -58,6 +58,13 @@ aws_describe_instances | jq '.Reservations |
          .Instances '
 end
 
+function get_all_instance_data_from_name
+# get_all_instance_data_from_name
+list_instances | jq 'map(select(has("Tags"))) |
+         map(select(.Tags[].Key=="Name" and .Tags[].Value=="'"$argv[1]"'")) | .[]'
+end
+
+
 function get_instance_data_from_name
 # instance_name
 list_instances | jq 'map(select(has("Tags"))) |
@@ -74,7 +81,7 @@ list_instances | jq 'map(select(has("Tags"))) |
          .InstanceId' | tr -d '"'
 end
 
-#Get availability zone from a given instance name ir ud.
+#Get availability zone from a given innstance name ir ud.
 function get_value
 # key value output
 aws_describe_instances | jq '.Reservations  |
@@ -86,7 +93,7 @@ aws_describe_instances | jq '.Reservations  |
          # .Placement' | tr -d '"'
 end
 
-# Convert instance name to its id
+# Convert the name of a running instance to its id
 function name_to_instance
 # instance_name
 get_value "Name" $argv[1] ".InstanceId"
@@ -116,7 +123,7 @@ function fill_alarm_args
 echo "$ALARM_SHARED_ARGS --alarm-name $argv[1] --metric-name $argv[2] --threshold $argv[3] --dimensions Name=InstanceId,Value="
 end
 
-function dns_from_name
+function name_to_dns
 # instance_name
 aws_describe_instances | jq '.Reservations  |
           .[] |
@@ -124,11 +131,35 @@ aws_describe_instances | jq '.Reservations  |
          map(select(.State.Name =="running")) | map(select(.Tags[].Key=="Name" and .Tags[].Value=="'$argv[1]'")) | .[] | .PublicDnsName' | tr -d '"'
 end
 
+function operate_instance
+# operator instance
+echo $AWS_PROFILE "$argv[1]-instances --instance-ids $argv[2]" | xargs aws ec2
+
+end
+
+function stop_instance
+# instance_id
+# Example: stop_instance (name_to_instance INSTANCE-NAME)
+operate_instance "stop" $argv[1]
+end
+
 function term_instance
 # instance_id
 # Example: term_instance (name_to_instance INSTANCE-NAME)
-echo $AWS_PROFILE "terminate-instances --instance-ids $argv[1]" | xargs aws ec2
+operate_instance "terminate" $argv[1]
 end
+
+function start_instance
+# instance_id
+operate_instance "start" $argv[1]
+end
+
+# Get instance name, include stopped instances
+function get_any_instance
+# instance-name
+get_all_instance_data_from_name $argv[1] | jq '.InstanceId' | tr -d '"'
+end
+
 #+end_src
 ** Create instances
 Base variables
@@ -143,14 +174,14 @@ Build CLI arguments for instances and their alarms
 #+begin_src shell
 #Instance args
 # set DCP_INSTANCE_ARGS (fill_instance_args $DCP_NAME m4.xlarge 8 ami-0ba60f12d0dc5fdb3)
-set DCP_INSTANCE_ARGS (fill_instance_args $DCP_NAME m4.xlarge 8 ami-0327bde68dc27cba8)
-set BACKEND_INSTANCE_ARGS (fill_instance_args $BACKEND_NAME m4.2xlarge 30 ami-0ba60f12d0dc5fdb3)
-set ASSAYDEV_INSTANCE_ARGS (fill_instance_args $ASSAYDEV_NAME m4.xlarge $EBS_SIZE ami-07b1358971158dc9b)
+set DCP_INSTANCE_ARGS $(fill_instance_args $DCP_NAME m4.xlarge 8 ami-0327bde68dc27cba8)
+set BACKEND_INSTANCE_ARGS $(fill_instance_args $BACKEND_NAME m4.2xlarge 30 ami-0ba60f12d0dc5fdb3)
+set ASSAYDEV_INSTANCE_ARGS $(fill_instance_args $ASSAYDEV_NAME m4.xlarge $EBS_SIZE ami-07b1358971158dc9b)
 
 # Alarm args
-set DCP_ALARM_ARGS (fill_alarm_args $DCP_NAME NetworkIn 7000)
-set BACKEND_ALARM_ARGS (fill_alarm_args $BACKEND_NAME CPUUtilization 1)
-set ASSAYDEV_ALARM_ARGS (fill_alarm_args $ASSAYDEV_NAME CPUUtilization 1)
+set DCP_ALARM_ARGS $(fill_alarm_args $DCP_NAME NetworkIn 7000)
+set BACKEND_ALARM_ARGS $(fill_alarm_args $BACKEND_NAME CPUUtilization 1)
+set ASSAYDEV_ALARM_ARGS $(fill_alarm_args $ASSAYDEV_NAME CPUUtilization 1)
 #+end_src
 
 Deploy instances and their alarms
@@ -206,11 +237,11 @@ Get availability zone
 # Automated volume attachment is not working for some reason
 # echo $ATTACH_VOLUME_ARGS | xargs aws ec2
 
-#i-007532faaefc13048
 #+end_src
 
 Run these commands after their replacement
 #+begin_src shell
+
 echo "D:"
 echo "aws s3 sync  s3://$BUCKET/projects/$PROJECT/workspace/load_data_csv/ load_data_csv\\"
 echo "aws s3 sync s3://$BUCKET/projects/$PROJECT/workspace/pipelines/ pipelines\\"
@@ -221,23 +252,33 @@ echo "aws s3 sync s3://$BUCKET/projects/$PROJECT/$BATCH/images/ $BATCH\\images\\
 *** Edit CSV for windows
 I plan to move all the Windows section to a graphical Ubuntu environment. For now, to use GNU utils I installed cywin (https://www.cygwin.com/install.html).
 
-#+begin_src shell
-sed -i 's/\/home\/ubuntu\/bucket\/projects\/\S+?\//D:\\/g' load_data_with_illum.csv
-
+#+begin_src bash
+sed -Ei 's/\/home\/ubuntu\/bucket\/projects\/[a-zA-Z0-9_]+\//D:\\/g' load_data_with_illum.csv
 sed -i 's/\//\\/g' load_data_with_illum.csv
 #+end_src
 
-**** Edit assaydev.pipe
+**** Edit assaydev.pipe from within CellProfiler
+- Find sensible parameters
+  
 **** Upload to aws
 #+begin_src shell
 echo "aws s3 cp D:\\\pipelines\\\\"$BATCH"\\\assaydev.cppipe s3://$BUCKET/projects/$PROJECT/workspace/pipelines/$BATCH/assaydev.cppipe"
 #+end_src
 
+**** Stop Windows instance
+#+begin_src shell
+stop_instance (name_to_instance "ALAN_Windows")
+
+# To restart this instance you can do
+# start_instance (get_any_instance "ALAN_Windows")
+#+end_src
+
+
 ** DevAssay (DCP + Windows-AssayDev)
 *** Configure Distributed Cell Profiler.
 #+begin_src shell
 ssh-add "~/.ssh/$KEY".pem
-set REMOTE_ADDRESS ( ssh dns_from_name $DCP_NAME )
+set REMOTE_ADDRESS ( ssh name_to_dns $DCP_NAME )
 scp .ssh/$KEY.pem ubuntu@$REMOTE_ADDRESS:/home/ubuntu/.ssh/
 
 ssh ubuntu@$REMOTE_ADDRESS
@@ -283,7 +324,7 @@ Install ImageMagick https://imagemagick.org/script/download.php and stitch the i
 #+begin_src bash
 # cd D:/assaydev/2023_08_02_Batch5
 cd D:/assaydev/$BATCH
-env MAGICK_TMPDIR=. montage */*.png -resize 50% -tile 16x25 -geometry +0+0 montage.png
+env MAGICK_TMPDIR=. montage */*.tif -resize 50% -tile 16x25 -geometry +0+0 montage.png
 
 # CAREFUL with this line, ensure you are running it from the assaydev folder
 # for i in $(find . -mindepth 1 -maxdepth 1 -type d); do rm -r $i; done
@@ -331,6 +372,47 @@ python3 run.py startCluster files/analysisFleet.json
 python run.py monitor files/$PROJECT\_AnalysisSpotFleetRequestId.json
 # TODO check parameters, as monitor failed once
 # aws s3 --profile imaging-platform ls s3://$BUCKET/projects/$PROJECT/$BATCH/images/ | cut -f29 -d' '| tr -s '_' | cut -f1 -d'_' | sed '/^\s*$/d' | sed 's/.*/"&"/g' |tr '\n' ','
+#+end_src
+
+** Backend generation (DCP or Backends?)
+#+begin_src shell
+# Get core count
+set BACKEND_DNS (name_to_dns "ALAN_Backend")
+ssh ubuntu@$BACKEND_DNS 'mkdir -p ~/.aws'
+# copy credentials to the remote server
+# If you only have one set, do scp ~/.aws/credentials ubuntu@$BACKEND_DNS ~/.aws/credentials. In this case I have two sets, imaging-platform being the ones I need there
+sed -e '1,/imaging-platform/d' ~/.aws/credentials | tac | gsed -e '$a[default]' | tac | ssh ubuntu@$BACKEND_DNS 'cat > ~/.aws/credentials'
+
+get_instance_data_from_name $BACKEND_NAME | jq '.CpuOptions.CoreCount' # WRITE this down somewhere, we will use it in the next block
+
+# And let's move on to the server
+ssh ubuntu@(name_to_dns "ALAN_Backend")
+
+mkdir ~/ebs_tmp
+
+# TODO check cases where it is not mounted
+VOLUMENAME=$(lsblk | tr -s '  ' | grep "\/$" | cut -f1 -d' ' | sed 's/[[:punct:]]//g')
+
+# Check it exists
+sudo file -s /dev/$VOLUMENAME
+
+# If the previous command does not return "Linux rev 1.0 ext4 filesystem data", format it
+# sudo mkfs -t ext4 /dev/$VOLUMENAME
+
+# Mount it and give it all the permission
+sudo mount /dev/$VOLUMENAME /home/ubuntu/ebs_tmp
+sudo chmod 777 ~/ebs_tmp/
+#+end_src
+
+
+
+#+begin_src bash
+AWS_PROFILE="--profile imaging-platform" #Leave empty if only using one profile
+BUCKET="imaging-platform-ssf"
+PROJECT_NAME="2022_09_07_New_phenotypic_dye_testing_CDoT_Broad"
+BATCH_ID="2023_08_02_Batch5"
+MAXPROCS=3 # Copy the CPU count obtained in the last "get_instance_data_from_name..."
+
 #+end_src
 
 ** TODO add instance removal
