@@ -52,12 +52,22 @@ function aws_describe_instances
 echo $AWS_PROFILE "describe-instances" | xargs aws ec2
 end
 
-function get_instance_ids
-# instance_name
+function list_instances
 aws_describe_instances | jq '.Reservations |
          .[] |
-         .Instances |
-         map(select(has("Tags"))) |
+         .Instances '
+end
+
+function get_instance_data_from_name
+# instance_name
+list_instances | jq 'map(select(has("Tags"))) |
+         map(select(.Tags[].Key=="Name" and .Tags[].Value=="'"$argv[1]"'"))|
+         map(select(.State.Name =="running")) | .[]'
+end
+
+function get_instance_ids
+# instance_name
+list_instances | jq 'map(select(has("Tags"))) |
          map(select(.Tags[].Key=="Name" and .Tags[].Value=="'"$argv[1]"'")) |
          map(select(.State.Name =="running")) |
          .[] |
@@ -96,17 +106,6 @@ function get_volume_id
 cat - | jq ".VolumeId" | tr -d '"'
 end
 
-#+end_src
-
-** Create instances
-Base variables
-#+begin_src shell
-set INSTANCE_SHARED_ARGS "$AWS_PROFILE run-instances --count 1 --key-name $KEY"
-set ALARM_SHARED_ARGS "$AWS_PROFILE put-metric-alarm --evaluation-periods 6 --comparison-operator LessThanThreshold --datapoints-to-alarm 6 --treat-missing-data notBreaching --statistic Average --period 10 --namespace test"
-#+end_src
-
-Helper funcitons
-#+begin_src shell
 function fill_instance_args
 # suffix instance_type volume_size ami
 echo "$INSTANCE_SHARED_ARGS --instance-type $argv[2] --block-device-mappings [{\\\"DeviceName\\\":\\\"xvdh\\\",\\\"Ebs\\\":{\\\"VolumeSize\\\":$argv[3],\\\"DeleteOnTermination\\\":false}}] --tag-specification ResourceType=instance,Tags=[{Key=User,Value=$USERNAME},{Key=Name,Value=$argv[1]}] ResourceType=volume,Tags=[{Key=User,Value=$USERNAME}] --image-id $argv[4]"
@@ -116,7 +115,29 @@ function fill_alarm_args
 #suffix metric threshold
 echo "$ALARM_SHARED_ARGS --alarm-name $argv[1] --metric-name $argv[2] --threshold $argv[3] --dimensions Name=InstanceId,Value="
 end
+
+function dns_from_name
+# instance_name
+aws_describe_instances | jq '.Reservations  |
+          .[] |
+          .Instances |
+         map(select(.State.Name =="running")) | map(select(.Tags[].Key=="Name" and .Tags[].Value=="'$argv[1]'")) | .[] | .PublicDnsName' | tr -d '"'
+end
+
+function term_instance
+# instance_id
+# Example: term_instance (name_to_instance INSTANCE-NAME)
+echo $AWS_PROFILE "terminate-instances --instance-ids $argv[1]" | xargs aws ec2
+end
 #+end_src
+** Create instances
+Base variables
+#+begin_src shell
+set INSTANCE_SHARED_ARGS "$AWS_PROFILE run-instances --count 1 --key-name $KEY"
+set ALARM_SHARED_ARGS "$AWS_PROFILE put-metric-alarm --evaluation-periods 6 --comparison-operator LessThanThreshold --datapoints-to-alarm 6 --treat-missing-data notBreaching --statistic Average --period 10 --namespace test"
+#+end_src
+
+Helper functions
 
 Build CLI arguments for instances and their alarms
 #+begin_src shell
@@ -150,19 +171,6 @@ if test -z (name_to_instance $ASSAYDEV_NAME)
 echo $ASSAYDEV_INSTANCE_ARGS "--subnet-id subnet-0d87ae6d910b8b478 --security-group-ids sg-076139d4acc4b5a3c" | xargs aws ec2 | get_instance_id | sed -E "s/(.*)/$ASSAYDEV_ALARM_ARGS\1/" | xargs aws cloudwatch
 end
 
-function dns_from_name
-# instance_name
-aws_describe_instances | jq '.Reservations  |
-          .[] |
-          .Instances |
-         map(select(.State.Name =="running")) | map(select(.Tags[].Key=="Name" and .Tags[].Value=="'$argv[1]'")) | .[] | .PublicDnsName' | tr -d '"'
-end
-
-function term_instance
-# instance_id
-# Example: term_instance (name_to_instance INSTANCE-NAME)
-echo $AWS_PROFILE "terminate-instances --instance-ids $argv[1]" | xargs aws ec2
-end
 #+end_src
 
 #+begin_src shell
@@ -185,12 +193,9 @@ end
 - Download the Remote (rdp) file
 Then (sadly) open Microsoft remote desktop manuallt.
 
-** Add storage for batch
-You can check the space needed
-#+begin_src shell
-#+end_src
-- Batch 5: 46.4 GB
 
+** TODO add Illum section
+** Add storage for batch
 *** Create and attach an EBS volume
 
 Get availability zone
@@ -228,12 +233,12 @@ sed -i 's/\//\\/g' load_data_with_illum.csv
 echo "aws s3 cp D:\\\pipelines\\\\"$BATCH"\\\assaydev.cppipe s3://$BUCKET/projects/$PROJECT/workspace/pipelines/$BATCH/assaydev.cppipe"
 #+end_src
 
-*** Run DevAssay
-**** Configure Distributed Cell Profiler.
+** DevAssay (DCP + Windows-AssayDev)
+*** Configure Distributed Cell Profiler.
 #+begin_src shell
 ssh-add "~/.ssh/$KEY".pem
 set REMOTE_ADDRESS ( ssh dns_from_name $DCP_NAME )
-scp .ssh/amunozgo_cimini.pem ubuntu@$REMOTE_ADDRESS:/home/ubuntu/.ssh/
+scp .ssh/$KEY.pem ubuntu@$REMOTE_ADDRESS:/home/ubuntu/.ssh/
 
 ssh ubuntu@$REMOTE_ADDRESS
 
@@ -245,8 +250,87 @@ sed -Ei "s/^CLUSTER_MACHINES = .*/CLUSTER_MACHINES = 100/" config.py
 sed -Ei "s/^SQS_MESSAGE_VISIBILITY = .*/SQS_MESSAGE_VISIBILITY = 10 * 60/" config.py
 sed -Ei "s/^EXPECTED_NUMBER_FILES = .*/EXPECTED_NUMBER_FILES = 1/" config.py
 sed -Ei "s/^SQS_DEAD_LETTER_QUEUE = .*/SQS_DEAD_LETTER_QUEUE = '$USER\_DeadMessages'/" config.py
-
 #+end_src
-**** Configure Batch File
-**** Run segmentation for a subset of the data
-**** Stitch images into one
+
+*** Configure Batch File
+#+begin_src shell
+# Batch general
+sed -Ei "s/^topdirname=.*/topdirname='$PROJECT'/" run_batch_general.py
+sed -Ei "s/^appname=.*/appname='$PROJECT'/" run_batch_general.py
+sed -Ei "s/^batchsuffix=.*/batchsuffix='$BATCH'/" run_batch_general.py
+sed -Ei "s/^rows=.*/rows=list(string.ascii_uppercase)[:16]/" run_batch_general.py #TODO check where can we obtain this info
+sed -Ei "s/^cols=.*/cols=range(1,25)/" run_batch_general.py #TODO check where can we obtain this info
+# TODO use this aws s3 --profile imaging-platform ls s3://$BUCKET/projects/$PROJECT/$BATCH/images/BR00122249__2023-03-25T00_14_17-Measurement2/Images/ | cut -f7 -d' ' | cut -f1 -d'-'
+sed -Ei "s/^sites=.*/sites=range(1,10)/" run_batch_general.py #TODO check where can we obtain this info
+sed -Ei "s/^#?Make(\S+)Jobs(.*)/#Make\1\Jobs\2"
+sed -Ei "s/^#MakeAssayDevJobs(.*)/MakeAssayDevJobs\1/"
+# aws s3 --profile imaging-platform ls s3://$BUCKET/projects/$PROJECT/$BATCH/images/ | cut -f29 -d' ' | cut -f2 -d'__' sed '/^\s*$/d' | tr -d '/' | sed 's/.*/"&"/g'|tr '\n' ','
+# TODO replace key automatically
+#+end_src
+
+*** Run AssayDev
+#+begin_src shell
+python3 run.py setup
+python3 run_batch_general.py
+python3 run.py startCluster files/analysisFleet.json
+python run.py monitor files/$PROJECT\_AssayDevSpotFleetRequestId.json
+# TODO check parameters, as monitor failed once
+# aws s3 --profile imaging-platform ls s3://$BUCKET/projects/$PROJECT/$BATCH/images/ | cut -f29 -d' '| tr -s '_' | cut -f1 -d'_' | sed '/^\s*$/d' | sed 's/.*/"&"/g' |tr '\n' ','
+#+end_src
+
+*** Stitch images into one
+Install ImageMagick https://imagemagick.org/script/download.php and stitch the images with this one-liner
+#+begin_src bash
+# cd D:/assaydev/2023_08_02_Batch5
+cd D:/assaydev/$BATCH
+env MAGICK_TMPDIR=. montage */*.png -resize 50% -tile 16x25 -geometry +0+0 montage.png
+
+# CAREFUL with this line, ensure you are running it from the assaydev folder
+# for i in $(find . -mindepth 1 -maxdepth 1 -type d); do rm -r $i; done
+# Or just send the montage
+aws s3 cp D:\\assaydev\${BATCH_ID}\montage.png s3://${BUCKET}/projects/${PROJECT_NAME}/workspace/assaydev/montages/${BATCH_ID}/montage.png
+#+end_src
+
+*** Transfer identification sections to analysis
+Copy the "Identify*" steps and adjust data to avoid red crosses (by changing directory name and channel names).
+#+begin_src bash
+aws s3 cp D:\\pipelines\${BATCH_ID}\analysis.cppipe s3://${BUCKET}/projects/${PROJECT_NAME}/workspace/pipelines/${BATCH_ID}/analysis.cppipe
+# aws s3 cp D:\\pipelines\2023_08_02_Batch5\analysis.cppipe s3://imaging-platform-ssf/projects/2022_09_07_New_phenotypic_dye_testing_CDoT_Broad/workspace/pipelines/2023_08_02_Batch5/analysis.cppipe
+#+end_src
+** Delete EBS volume
+In the AWS console EC2 => under Elastic Block Store Volumes => select the external volume. Actions => Detach volume or Force detach volume. Actions => Delete volume.
+#+begin_src shell
+# aws ec2 detach_volume
+
+# Get attached volume from instanceid
+function volume_from_instance_device_names
+# instance_name device_name
+get_instance_data_from_name $argv[1] | jq '.BlockDeviceMappings | map(select(.DeviceName=="'"$argv[2]"'")) |.[] | .Ebs.VolumeId' | tr -d '"'
+end
+#+end_src
+
+Now use the helper functions to detach and delete the volume
+#+begin_src shell
+set VOLUME_ID (volume_from_instance_device_names "ALAN_Windows" "/dev/sdf")
+echo detach-volume $AWS_PROFILE --volume-id $VOLUME_ID | xargs aws ec2 && echo delete-volume $AWS_PROFILE --volume-id $VOLUME_ID | xargs aws ec2
+#+end_src
+
+** Analysis (DCP)
+
+#+begin_src shell
+cd ~/efs/$PROJECT/workspace/software/Distributed-CellProfiler
+sed -Ei "s/^APP_NAME = .*/APP_NAME = '$PROJECT\_Analysis'/" config.py
+sed -Ei "s/^SQS_MESSAGE_VISIBILITY = .*/SQS_MESSAGE_VISIBILITY = 120 * 60/" config.py
+sed -Ei "s/^EXPECTED_NUMBER_FILES = .*/EXPECTED_NUMBER_FILES = 5/" config.py
+#+end_src
+
+#+begin_src shell
+python3 run.py setup
+python3 run_batch_general.py
+python3 run.py startCluster files/analysisFleet.json
+python run.py monitor files/$PROJECT\_AnalysisSpotFleetRequestId.json
+# TODO check parameters, as monitor failed once
+# aws s3 --profile imaging-platform ls s3://$BUCKET/projects/$PROJECT/$BATCH/images/ | cut -f29 -d' '| tr -s '_' | cut -f1 -d'_' | sed '/^\s*$/d' | sed 's/.*/"&"/g' |tr '\n' ','
+#+end_src
+
+** TODO add instance removal
