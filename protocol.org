@@ -8,7 +8,8 @@ Analysis starting after the producion of illum files (all previous steps were pe
 :PROPERTIES:
 :header-args:shell: :session *main* :results output silent :exports code
 :END:
-** Set variables
+** Setup
+*** Set environment variables
 User variables
 #+begin_src shell
 set USER "ALAN" # for Instance names
@@ -38,7 +39,7 @@ Calculated variables
 set BATCH_SIZE (echo "ls $AWS_PROFILE  s3://$BUCKET/projects/$PROJECT/$BATCH/images --summarize --human-readable --recursive" | xargs aws s3 | tail -n 1)
 set EBS_SIZE (echo $BATCH_SIZE | cut -f6 -d" " | sed -E "s/(.+)/ceil(\1 *1.1)/" | math)
 #+end_src
-** Helper functions
+*** Helper functions
 These will make the code below shorter. The only dependencies are aws, jq, and some basic command line tools: sed, awk, tr.
 
 Get instance id from STDIN
@@ -161,6 +162,19 @@ get_all_instance_data_from_name $argv[1] | jq '.InstanceId' | tr -d '"'
 end
 
 #+end_src
+*** Install Microsoft remote desktop
+For MacOS:
+#+begin_src shell
+if not type -q microsoft-remote-desktop
+    brew install --cask microsoft-remote-desktop
+end
+#+end_src
+
+#+RESULTS:
+
+- Download the Remote (rdp) file
+Then (sadly) open Microsoft remote desktop manuallt.
+
 ** Create instances
 Base variables
 #+begin_src shell
@@ -212,34 +226,13 @@ end
 
 Now all instances should be deployed.
 
-** Install Microsoft remote desktop
-#+begin_src shell
-if not type -q microsoft-remote-desktop
-    brew install --cask microsoft-remote-desktop
-end
-#+end_src
-
-#+RESULTS:
-
-- Download the Remote (rdp) file
-Then (sadly) open Microsoft remote desktop manuallt.
-
-
 ** TODO add Illum section
-** Add storage for batch
-*** Create and attach an EBS volume
 
-Get availability zone
-#+begin_src shell
-# set ATTACH_VOLUME_ARGS "attach-volume --device xvdh --instance-id $(name_to_instance $ASSAYDEV_NAME)'' --volume-id "
+** DevAssay (DCP + Windows-AssayDev)
+*** Add storage for batch
+**** Create and attach an EBS volume
 
-# echo "$AWS_PROFILE create-volume --availability-zone $(name_to_azone $ASSAYDEV_NAME) --size $EBS_SIZE --tag-specifications ResourceType=volume,Tags=[{Key=User,Value=$USERNAME},{Key=Name,Value="$USER"_AssayDev}]" | xargs aws ec2 # | get_volume_id | sed -E "s/^/$ATTACH_VOLUME_ARGS/" | xargs aws ec2
-# Automated volume attachment is not working for some reason
-# echo $ATTACH_VOLUME_ARGS | xargs aws ec2
-
-#+end_src
-
-Run these commands after their replacement
+Run these commands locally and paste them in the environment once the variables have undergone substitutio  n
 #+begin_src shell
 
 echo "D:"
@@ -249,17 +242,18 @@ echo "aws s3 sync s3://$BUCKET/projects/$PROJECT/$BATCH/illum/ illum\\$BATCH\\"
 echo "aws s3 sync s3://$BUCKET/projects/$PROJECT/$BATCH/images/ $BATCH\\images\\"
 #+end_src
 
-*** Edit CSV for windows
-I plan to move all the Windows section to a graphical Ubuntu environment. For now, to use GNU utils I installed cywin (https://www.cygwin.com/install.html).
+*** Edit CSV on windows
+I plan to move all the Windows section to a graphical Ubuntu environment. For now, you can use GNU utils I installed cywin (    https://www.cygwin.com/install.html).
 
 #+begin_src bash
 sed -Ei 's/\/home\/ubuntu\/bucket\/projects\/[a-zA-Z0-9_]+\//D:\\/g' load_data_with_illum.csv
 sed -i 's/\//\\/g' load_data_with_illum.csv
 #+end_src
 
-**** Edit assaydev.pipe from within CellProfiler
-- Find sensible parameters
-  
+**** Edit assaydev.cpp from within CellProfiler
+- Deactivate the flag module to find sensible parameters
+- IMPORTANT: re-activate the Flag module after you are djone
+
 **** Upload to aws
 #+begin_src shell
 echo "aws s3 cp D:\\\pipelines\\\\"$BATCH"\\\assaydev.cppipe s3://$BUCKET/projects/$PROJECT/workspace/pipelines/$BATCH/assaydev.cppipe"
@@ -273,10 +267,10 @@ stop_instance (name_to_instance "ALAN_Windows")
 # start_instance (get_any_instance "ALAN_Windows")
 #+end_src
 
-
-** DevAssay (DCP + Windows-AssayDev)
 *** Configure Distributed Cell Profiler.
+**** Edit config.py
 #+begin_src shell
+
 ssh-add "~/.ssh/$KEY".pem
 set REMOTE_ADDRESS ( ssh name_to_dns $DCP_NAME )
 scp .ssh/$KEY.pem ubuntu@$REMOTE_ADDRESS:/home/ubuntu/.ssh/
@@ -284,6 +278,13 @@ scp .ssh/$KEY.pem ubuntu@$REMOTE_ADDRESS:/home/ubuntu/.ssh/
 ssh ubuntu@$REMOTE_ADDRESS
 
 # On the running DCP instance
+AWS_PROFILE="--profile imaging-platform" #Leave empty if only using one profile
+
+USER="ALAN" # for Instance names
+BUCKET="imaging-platform-ssf"
+PROJECT="2022_09_07_New_phenotypic_dye_testing_CDoT_Broad"
+BATCH="2023_08_02_Batch5"
+
 cd ~/efs/$PROJECT/workspace/software/Distributed-CellProfiler
 sed -Ei "s/^APP_NAME = .*/APP_NAME = '$PROJECT\_AssayDev'/" config.py
 sed -Ei "s/^SSH_KEY_NAME = .*/SSH_KEY_NAME = '$KEY.pem'/" config.py
@@ -293,7 +294,7 @@ sed -Ei "s/^EXPECTED_NUMBER_FILES = .*/EXPECTED_NUMBER_FILES = 1/" config.py
 sed -Ei "s/^SQS_DEAD_LETTER_QUEUE = .*/SQS_DEAD_LETTER_QUEUE = '$USER\_DeadMessages'/" config.py
 #+end_src
 
-*** Configure Batch File
+**** Edit batch file
 #+begin_src shell
 # Batch general
 sed -Ei "s/^topdirname=.*/topdirname='$PROJECT'/" run_batch_general.py
@@ -303,21 +304,20 @@ sed -Ei "s/^rows=.*/rows=list(string.ascii_uppercase)[:16]/" run_batch_general.p
 sed -Ei "s/^cols=.*/cols=range(1,25)/" run_batch_general.py #TODO check where can we obtain this info
 # TODO use this aws s3 --profile imaging-platform ls s3://$BUCKET/projects/$PROJECT/$BATCH/images/BR00122249__2023-03-25T00_14_17-Measurement2/Images/ | cut -f7 -d' ' | cut -f1 -d'-'
 sed -Ei "s/^sites=.*/sites=range(1,10)/" run_batch_general.py #TODO check where can we obtain this info
-sed -Ei "s/^#?Make(\S+)Jobs(.*)/#Make\1\Jobs\2"
-sed -Ei "s/^#MakeAssayDevJobs(.*)/MakeAssayDevJobs\1/"
+sed -Ei "s/^#?Make(\S+)Jobs(.*)/#Make\1\Jobs\2/" run_batch_general.py
+sed -Ei "s/^# *MakeAssayDevJobs(.*)/MakeAssayDevJobs\1/" run_batch_general.py
+# To Auto generate plates
 # aws s3 --profile imaging-platform ls s3://$BUCKET/projects/$PROJECT/$BATCH/images/ | cut -f29 -d' ' | cut -f2 -d'__' sed '/^\s*$/d' | tr -d '/' | sed 's/.*/"&"/g'|tr '\n' ','
 # TODO replace key automatically
 #+end_src
 
 *** Run AssayDev
-#+begin_src shell
-python3 run.py setup
-python3 run_batch_general.py
-python3 run.py startCluster files/analysisFleet.json
-python run.py monitor files/$PROJECT\_AssayDevSpotFleetRequestId.json
+#+begin_src bash
+python3 run.py setup && python3 run_batch_general.py && python3 run.py startCluster files/analysisFleet.json && python run.py monitor files/$PROJECT\_AssayDevSpotFleetRequestId.json
 # TODO check parameters, as monitor failed once
 # aws s3 --profile imaging-platform ls s3://$BUCKET/projects/$PROJECT/$BATCH/images/ | cut -f29 -d' '| tr -s '_' | cut -f1 -d'_' | sed '/^\s*$/d' | sed 's/.*/"&"/g' |tr '\n' ','
 #+end_src
+**** TODO add killswitch in case of interruptions
 
 *** Stitch images into one
 Install ImageMagick https://imagemagick.org/script/download.php and stitch the images with this one-liner
@@ -332,8 +332,9 @@ env MAGICK_TMPDIR=. montage */*.tif -resize 50% -tile 16x25 -geometry +0+0 monta
 aws s3 cp D:\\assaydev\${BATCH_ID}\montage.png s3://${BUCKET}/projects/${PROJECT_NAME}/workspace/assaydev/montages/${BATCH_ID}/montage.png
 #+end_src
 
-*** Transfer identification sections to analysis
+*** Transfer identification sections from assay.cpp to analysis
 Copy the "Identify*" steps and adjust data to avoid red crosses (by changing directory name and channel names).
+*** Transfer identification sections to analysis
 #+begin_src bash
 aws s3 cp D:\\pipelines\${BATCH_ID}\analysis.cppipe s3://${BUCKET}/projects/${PROJECT_NAME}/workspace/pipelines/${BATCH_ID}/analysis.cppipe
 # aws s3 cp D:\\pipelines\2023_08_02_Batch5\analysis.cppipe s3://imaging-platform-ssf/projects/2022_09_07_New_phenotypic_dye_testing_CDoT_Broad/workspace/pipelines/2023_08_02_Batch5/analysis.cppipe
@@ -415,4 +416,4 @@ MAXPROCS=3 # Copy the CPU count obtained in the last "get_instance_data_from_nam
 
 #+end_src
 
-** TODO add instance removal
+** TODO cleanup all instances
