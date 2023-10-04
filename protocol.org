@@ -329,7 +329,6 @@ Install ImageMagick https://imagemagick.org/script/download.php and stitch the i
 #+begin_src bash
 # For an Ubuntu instance
 sudo apt install imagemagick
-# cd D:/assaydev/2023_08_02_Batch5
 
 # Do it from DCP
 IMAGES="$WORKSPACE/assaydev/$BATCH"
@@ -339,8 +338,7 @@ aws s3 sync s3://$BUCKET/projects/$PROJECT/workspace/assaydev/$BATCH/ $IMAGES/
 mkdir -p $WORKSPACE/assaydev/montages/$BATCH
 PLATES=$(ls $BATCH | cut -f1 -d' ' | cut -f1 -d'-' | uniq)
 for PLATE in "${PLATES[@]}"; do
-    echo $PLATE
-    montage $BATCH/${PLATE}*/*.png -resize 50% -tile 16x25 -geometry +0+0 -compress zip -channel 0 montages/$BATCH/$PLATE.tif
+    montage $BATCH/${PLATE}*/*.png -resize 50% -tile 16x25 -geometry +0+0 montages/$BATCH/$PLATE.tif
 done
 
 aws s3 sync $WORKSPACE/assaydev/montages/$BATCH s3://$BUCKET/projects/$PROJECT/workspace/assaydev/montages/$BATCH/
