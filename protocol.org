@@ -280,12 +280,14 @@ ssh ubuntu@$REMOTE_ADDRESS
 # On the running DCP instance
 AWS_PROFILE="--profile imaging-platform" #Leave empty if only using one profile
 
+screen
 USER="ALAN" # for Instance names
 BUCKET="imaging-platform-ssf"
 PROJECT="2022_09_07_New_phenotypic_dye_testing_CDoT_Broad"
 BATCH="2023_08_02_Batch5"
 
-cd ~/efs/$PROJECT/workspace/software/Distributed-CellProfiler
+WORKSPACE="$HOME/efs/$PROJECT/workspace"
+cd $WORKSPACE/software/Distributed-CellProfiler
 sed -Ei "s/^APP_NAME = .*/APP_NAME = '$PROJECT\_AssayDev'/" config.py
 sed -Ei "s/^SSH_KEY_NAME = .*/SSH_KEY_NAME = '$KEY.pem'/" config.py
 sed -Ei "s/^CLUSTER_MACHINES = .*/CLUSTER_MACHINES = 100/" config.py
@@ -309,27 +311,39 @@ sed -Ei "s/^# *MakeAssayDevJobs(.*)/MakeAssayDevJobs\1/" run_batch_general.py
 # To Auto generate plates
 # aws s3 --profile imaging-platform ls s3://$BUCKET/projects/$PROJECT/$BATCH/images/ | cut -f29 -d' ' | cut -f2 -d'__' sed '/^\s*$/d' | tr -d '/' | sed 's/.*/"&"/g'|tr '\n' ','
 # TODO replace key automatically
+
 #+end_src
 
 *** Run AssayDev
 #+begin_src bash
 python3 run.py setup && python3 run_batch_general.py && python3 run.py startCluster files/analysisFleet.json && python run.py monitor files/$PROJECT\_AssayDevSpotFleetRequestId.json
-# TODO check parameters, as monitor failed once
-# aws s3 --profile imaging-platform ls s3://$BUCKET/projects/$PROJECT/$BATCH/images/ | cut -f29 -d' '| tr -s '_' | cut -f1 -d'_' | sed '/^\s*$/d' | sed 's/.*/"&"/g' |tr '\n' ','
+# TODO check parameters, as monitor fails after everything works
 #+end_src
-**** TODO add killswitch in case of interruptions
 
-*** Stitch images into one
+At this point, PRESS Ctrl-A Ctrl-D to exit this screen. It will still run in the background.
+
+**** TODO add killswitch and cleanup command in case of interruptions
+
+*** Create montage
 Install ImageMagick https://imagemagick.org/script/download.php and stitch the images with this one-liner
 #+begin_src bash
+# For an Ubuntu instance
+sudo apt install imagemagick
 # cd D:/assaydev/2023_08_02_Batch5
-cd D:/assaydev/$BATCH
-env MAGICK_TMPDIR=. montage */*.tif -resize 50% -tile 16x25 -geometry +0+0 montage.png
 
-# CAREFUL with this line, ensure you are running it from the assaydev folder
-# for i in $(find . -mindepth 1 -maxdepth 1 -type d); do rm -r $i; done
-# Or just send the montage
-aws s3 cp D:\\assaydev\${BATCH_ID}\montage.png s3://${BUCKET}/projects/${PROJECT_NAME}/workspace/assaydev/montages/${BATCH_ID}/montage.png
+# Do it from DCP
+IMAGES="$WORKSPACE/assaydev/$BATCH"
+cd $WORKSPACE
+aws s3 sync s3://$BUCKET/projects/$PROJECT/workspace/assaydev/$BATCH/ $IMAGES/
+
+mkdir -p $WORKSPACE/assaydev/montages/$BATCH
+PLATES=$(ls $BATCH | cut -f1 -d' ' | cut -f1 -d'-' | uniq)
+for PLATE in "${PLATES[@]}"; do
+    echo $PLATE
+    montage $BATCH/${PLATE}*/*.png -resize 50% -tile 16x25 -geometry +0+0 -compress zip -channel 0 montages/$BATCH/$PLATE.tif
+done
+
+aws s3 sync $WORKSPACE/assaydev/montages/$BATCH s3://$BUCKET/projects/$PROJECT/workspace/assaydev/montages/$BATCH/
 #+end_src
 
 *** Transfer identification sections from assay.cpp to analysis
