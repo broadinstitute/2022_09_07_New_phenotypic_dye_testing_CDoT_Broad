@@ -1,0 +1,595 @@
+#+title: Protocol
+#+OPTIONS: ^:nil
+#+PROPERTY: HEADER-ARGS+ :eval no-export
+
+Analysis starting after the producion of illum files (all previous steps were performed by Suganya)
+
+* Main
+:PROPERTIES:
+:header-args:shell: :session *main* :results output silent :exports code
+:END:
+** Setup
+*** Set environment variables
+User variables
+#+begin_src shell
+set USER "ALAN" # for Instance names
+set USERNAME "amunozgo" # For tags
+set KEY "amunozgo_cimini" # Access key created on aws
+
+# Project variables
+
+set AWS_PROFILE "--profile imaging-platform" #Leave empty if only using one profile
+set BUCKET "imaging-platform-ssf"
+set PROJECT_NAME "2022_09_07_New_phenotypic_dye_testing_CDoT_Broad"
+set BATCH_ID "2023_08_02_Batch5"
+set WORKSPACE "s3://$BUCKET/projects/$PROJECT_NAME/workspace/"
+#+end_src
+
+Instance variables
+#+begin_src shell
+set DCP_NAME "$USER"_DCP
+set BACKENDS_NAME "$USER"_Backend
+set ASSAYDEV_NAME "$USER"_Windows
+#+end_src
+
+Calculated variables
+#+begin_src shell
+set BATCH_SIZE (calculate_size  s3://$BUCKET/projects/$PROJECT_NAME/$BATCH_ID/images)
+set EBS_SIZE (echo $BATCH_SIZE | cut -f6 -d" " | sed -E "s/(.+)/ceil(\1 *1.1)/" | math)
+#+end_src
+*** Helper functions
+These will make the code below shorter. The only dependencies are aws, jq, and some basic command line tools: sed, awk, tr.
+
+Get instance id from STDIN
+#+begin_src shell
+function calculate_size
+#s3_path
+echo ls $AWS_PROFILE --summarize --human-readable --recursive s3://$BUCKET/projects/$PROJECT_NAME/workspace/analysis/$BATCH | xargs aws s3 | tail -n 1 | cut -f6 -d ' '
+end
+
+function get_instance_id
+cat - | jq '."Instances"| .[] | .InstanceId' | tr -d '"'
+end
+
+#Get running instance id for a given name (e.g., ALAN_Backend)
+function aws_describe_instances
+echo $AWS_PROFILE "describe-instances" | xargs aws ec2
+end
+
+function list_instances
+aws_describe_instances | jq '.Reservations |
+         .[] |
+         .Instances '
+end
+
+function get_all_instance_data_from_name
+# get_all_instance_data_from_name
+list_instances | jq 'map(select(has("Tags"))) |
+         map(select(.Tags[].Key=="Name" and .Tags[].Value=="'"$argv[1]"'")) | .[]'
+end
+
+
+function get_instance_data_from_name
+# instance_name
+list_instances | jq 'map(select(has("Tags"))) |
+         map(select(.Tags[].Key=="Name" and .Tags[].Value=="'"$argv[1]"'"))|
+         map(select(.State.Name =="running")) | .[]'
+end
+
+function get_instance_ids
+# instance_name
+list_instances | jq 'map(select(has("Tags"))) |
+         map(select(.Tags[].Key=="Name" and .Tags[].Value=="'"$argv[1]"'")) |
+         map(select(.State.Name =="running")) |
+         .[] |
+         .InstanceId' | tr -d '"'
+end
+
+#Get availability zone from a given innstance name ir ud.
+function get_value
+# key value output
+aws_describe_instances | jq '.Reservations  |
+          .[] |
+          .Instances |
+         map(select(.State.Name =="running")) |
+         map(select(.Tags[].Key=="'"$argv[1]"'" and .Tags[].Value=="'"$argv[2]"'")) |
+         .[] | '$argv[3] | tr -d '"'
+         # .Placement' | tr -d '"'
+end
+
+# Convert the name of a running instance to its id
+function name_to_instance
+# instance_name
+get_value "Name" $argv[1] ".InstanceId"
+end
+
+# Convert instance name to its availability zone
+function name_to_azone
+# instance_id
+get_value "Name" $argv[1] ".Placement.AvailabilityZone"
+end
+
+# Examples
+# get_value "Name" "Alan_Windows" ".Placement.AvailabilityZone"
+# get_instance_id "Alan_Windows"
+
+function get_volume_id
+cat - | jq ".VolumeId" | tr -d '"'
+end
+
+function fill_instance_args
+# suffix instance_type volume_size ami
+echo "$INSTANCE_SHARED_ARGS --instance-type $argv[2] --block-device-mappings [{\\\"DeviceName\\\":\\\"xvdh\\\",\\\"Ebs\\\":{\\\"VolumeSize\\\":$argv[3],\\\"DeleteOnTermination\\\":false}}] --tag-specification ResourceType=instance,Tags=[{Key=User,Value=$USERNAME},{Key=Name,Value=$argv[1]}] ResourceType=volume,Tags=[{Key=User,Value=$USERNAME}] --image-id $argv[4]"
+end
+
+function fill_alarm_args
+#suffix metric threshold
+echo "$ALARM_SHARED_ARGS --alarm-name $argv[1] --metric-name $argv[2] --threshold $argv[3] --dimensions Name=InstanceId,Value="
+end
+
+function name_to_dns
+# instance_name
+aws_describe_instances | jq '.Reservations  |
+          .[] |
+          .Instances |
+         map(select(.State.Name =="running")) | map(select(.Tags[].Key=="Name" and .Tags[].Value=="'$argv[1]'")) | .[] | .PublicDnsName' | tr -d '"'
+end
+
+function operate_instance
+# operator instance
+echo $AWS_PROFILE "$argv[1]-instances --instance-ids $argv[2]" | xargs aws ec2
+
+end
+
+function stop_instance
+# instance_id
+# Example: stop_instance (name_to_instance INSTANCE-NAME)
+operate_instance "stop" $argv[1]
+end
+
+function term_instance
+# instance_id
+# Example: term_instance (name_to_instance INSTANCE-NAME)
+operate_instance "terminate" $argv[1]
+end
+
+function start_instance
+# instance_id
+operate_instance "start" $argv[1]
+end
+
+# Get instance name, include stopped instances
+function get_any_instance
+# instance-name
+get_all_instance_data_from_name $argv[1] | jq '.InstanceId' | tr -d '"'
+end
+
+#+end_src
+*** Install Microsoft remote desktop
+For MacOS:
+#+begin_src shell
+if not type -q microsoft-remote-desktop
+    brew install --cask microsoft-remote-desktop
+end
+#+end_src
+
+#+RESULTS:
+
+- Download the Remote (rdp) file
+Then (sadly) open Microsoft remote desktop manuallt.
+
+** Create instances
+Base variables
+#+begin_src shell
+set INSTANCE_SHARED_ARGS "$AWS_PROFILE run-instances --count 1 --key-name $KEY"
+set ALARM_SHARED_ARGS "$AWS_PROFILE put-metric-alarm --evaluation-periods 6 --comparison-operator LessThanThreshold --datapoints-to-alarm 6 --treat-missing-data notBreaching --statistic Average --period 10 --namespace test"
+#+end_src
+
+Helper functions
+
+Build CLI arguments for instances and their alarms
+#+begin_src shell
+#Instance args
+# set DCP_INSTANCE_ARGS (fill_instance_args $DCP_NAME m4.xlarge 8 ami-0ba60f12d0dc5fdb3)
+set DCP_INSTANCE_ARGS $(fill_instance_args $DCP_NAME m4.xlarge 8 ami-0327bde68dc27cba8)
+set BACKEND_INSTANCE_ARGS $(fill_instance_args $BACKENDS_NAME m4.2xlarge 30 ami-0ba60f12d0dc5fdb3)
+set ASSAYDEV_INSTANCE_ARGS $(fill_instance_args $ASSAYDEV_NAME m4.xlarge $EBS_SIZE ami-07b1358971158dc9b)
+
+# Alarm args
+set DCP_ALARM_ARGS $(fill_alarm_args $DCP_NAME NetworkIn 7000)
+set BACKEND_ALARM_ARGS $(fill_alarm_args $BACKENDS_NAME CPUUtilization 1)
+set ASSAYDEV_ALARM_ARGS $(fill_alarm_args $ASSAYDEV_NAME CPUUtilization 1)
+#+end_src
+
+Deploy instances and their alarms
+#+begin_src shell
+# DCP
+if test -z (name_to_instance $DCP_NAME)
+echo $DCP_INSTANCE_ARGS "--security-group-ids sg-039079dd69ae4371a" | xargs aws ec2 | get_instance_id | sed -E "s/(.*)/$DCP_ALARM_ARGS\1/" | xargs aws cloudwatch;
+end
+
+# BACKEND
+if test -z (name_to_instance $BACKENDS_NAME)
+echo $BACKEND_INSTANCE_ARGS "--security-group-ids sg-039079dd69ae4371a" | xargs aws ec2 | tee backend.json | get_instance_id | sed -E "s/(.*)/$BACKEND_ALARM_ARGS\1/" | xargs aws cloudwatch;
+
+end
+
+# AssayDev
+if test -z (name_to_instance $ASSAYDEV_NAME)
+echo $ASSAYDEV_INSTANCE_ARGS "--subnet-id subnet-0d87ae6d910b8b478 --security-group-ids sg-076139d4acc4b5a3c" | xargs aws ec2 | get_instance_id | sed -E "s/(.*)/$ASSAYDEV_ALARM_ARGS\1/" | xargs aws cloudwatch
+end
+
+#+end_src
+
+#+begin_src shell
+# echo (get_instance_id ALAN_DCP)
+# echo (get_instance_id ALAN_AssayDev)
+# echo (get_instance_id ALAN_Backend)
+#+end_src
+
+Now all instances should be deployed.
+
+** TODO add Illum section
+
+** DevAssay (DCP + Windows-AssayDev)
+*** Add storage for batch
+**** Create and attach an EBS volume
+
+Run these commands locally and paste them in the environment once the variables have undergone substitution
+#+begin_src shell
+
+echo "D:"
+echo "aws s3 sync  s3://$BUCKET/projects/$PROJECT_NAME/workspace/load_data_csv/ load_data_csv\\"
+echo "aws s3 sync s3://$BUCKET/projects/$PROJECT_NAME/workspace/pipelines/ pipelines\\"
+echo "aws s3 sync s3://$BUCKET/projects/$PROJECT_NAME/$BATCH_ID/illum/ illum\\$BATCH\\"
+echo "aws s3 sync s3://$BUCKET/projects/$PROJECT_NAME/$BATCH_ID/images/ $BATCH\\images\\"
+#+end_src
+
+*** Edit CSV on windows
+I plan to move all the Windows section to a graphical Ubuntu environment. For now, you can use GNU utils I installed cywin (    https://www.cygwin.com/install.html).
+
+#+begin_src bash
+sed -Ei 's/\/home\/ubuntu\/bucket\/projects\/[a-zA-Z0-9_]+\//D:\\/g' load_data_with_illum.csv
+sed -i 's/\//\\/g' load_data_with_illum.csv
+#+end_src
+
+**** Edit assaydev.cpp from within CellProfiler
+- Deactivate the flag module to find sensible parameters
+- IMPORTANT: re-activate the Flag module after you are djone
+
+**** Upload to aws
+#+begin_src shell
+echo "aws s3 cp D:\\\pipelines\\\\"$BATCH_ID"\\\assaydev.cppipe s3://$BUCKET/projects/$PROJECT_NAME/workspace/pipelines/$BATCH_ID/assaydev.cppipe"
+#+end_src
+
+**** Stop Windows instance
+#+begin_src shell
+stop_instance (name_to_instance "ALAN_Windows")
+
+# To restart this instance you can do
+# start_instance (get_any_instance "ALAN_Windows")
+#+end_src
+
+*** Configure Distributed Cell Profiler.
+**** Edit config.py
+#+begin_src shell
+
+ssh-add "~/.ssh/$KEY".pem
+set REMOTE_ADDRESS ( ssh name_to_dns $DCP_NAME )
+scp .ssh/$KEY.pem ubuntu@$REMOTE_ADDRESS:/home/ubuntu/.ssh/
+
+ssh ubuntu@$REMOTE_ADDRESS
+
+# On the running DCP instance
+
+screen
+AWS_PROFILE="--profile imaging-platform" #Leave empty if only using one profile
+USER="ALAN" # for Instance names
+BUCKET="imaging-platform-ssf"
+PROJECT="2022_09_07_New_phenotypic_dye_testing_CDoT_Broad"
+BATCH_ID="2023_08_02_Batch5"
+
+WORKSPACE="$HOME/efs/$PROJECT_NAME/workspace"
+cd $WORKSPACE/software/Distributed-CellProfiler
+sed -Ei "s/^APP_NAME = .*/APP_NAME = '$PROJECT\_AssayDev'/" config.py
+sed -Ei "s/^SSH_KEY_NAME = .*/SSH_KEY_NAME = '$KEY.pem'/" config.py
+sed -Ei "s/^CLUSTER_MACHINES = .*/CLUSTER_MACHINES = 100/" config.py
+sed -Ei "s/^SQS_MESSAGE_VISIBILITY = .*/SQS_MESSAGE_VISIBILITY = 10 * 60/" config.py
+sed -Ei "s/^EXPECTED_NUMBER_FILES = .*/EXPECTED_NUMBER_FILES = 1/" config.py
+sed -Ei "s/^SQS_DEAD_LETTER_QUEUE = .*/SQS_DEAD_LETTER_QUEUE = '$USER\_DeadMessages'/" config.py
+#+end_src
+
+**** Edit batch file
+#+begin_src shell
+# Batch general
+sed -Ei "s/^topdirname=.*/topdirname='$PROJECT'/" run_batch_general.py
+sed -Ei "s/^appname=.*/appname='$PROJECT'/" run_batch_general.py
+sed -Ei "s/^batchsuffix=.*/batchsuffix='$BATCH_ID'/" run_batch_general.py
+sed -Ei "s/^rows=.*/rows=list(string.ascii_uppercase)[:16]/" run_batch_general.py #TODO check where can we obtain this info
+sed -Ei "s/^cols=.*/cols=range(1,25)/" run_batch_general.py #TODO check where can we obtain this info
+# TODO use this aws s3 --profile imaging-platform ls s3://$BUCKET/projects/$PROJECT_NAME/$BATCH_ID/images/BR00122249__2023-03-25T00_14_17-Measurement2/Images/ | cut -f7 -d' ' | cut -f1 -d'-'
+sed -Ei "s/^sites=.*/sites=range(1,10)/" run_batch_general.py #TODO check where can we obtain this info
+sed -Ei "s/^#?Make(\S+)Jobs(.*)/#Make\1\Jobs\2/" run_batch_general.py
+sed -Ei "s/^# *MakeAssayDevJobs(.*)/MakeAssayDevJobs\1/" run_batch_general.py
+# To Auto generate plates
+# aws s3 --profile imaging-platform ls s3://$BUCKET/projects/$PROJECT_NAME/$BATCH_ID/images/ | cut -f29 -d' ' | cut -f2 -d'__' sed '/^\s*$/d' | tr -d '/' | sed 's/.*/"&"/g'|tr '\n' ','
+# TODO replace key automatically
+
+#+end_src
+
+*** Run AssayDev
+#+begin_src bash
+python3 run.py setup && python3 run_batch_general.py && python3 run.py startCluster files/analysisFleet.json && python run.py monitor files/$PROJECT\_AssayDevSpotFleetRequestId.json
+# TODO check parameters, as monitor fails after everything works
+#+end_src
+
+At this point, PRESS Ctrl-A Ctrl-D to exit this screen. It will still run in the background.
+
+**** TODO add killswitch and cleanup command in case of interruptions
+
+*** Create montage
+Install ImageMagick https://imagemagick.org/script/download.php and stitch the images with this one-liner
+#+begin_src bash
+# For an Ubuntu instance
+sudo apt install imagemagick
+
+# Do it from DCP
+IMAGES="$WORKSPACE/assaydev/$BATCH"
+cd $WORKSPACE
+aws s3 sync $WORKSPACE/assaydev/$BATCH_ID/ $IMAGES/
+
+mkdir -p $WORKSPACE/assaydev/montages/$BATCH_ID
+PLATES=$(ls $BATCH_ID | cut -f1 -d' ' | cut -f1 -d'-' | uniq)
+for PLATE in "${PLATES[@]}"; do
+    montage $BATCH_ID/${PLATE}*/*.png -resize 50% -tile 16x24 -geometry +0+0 montages/$BATCH_ID/$PLATE.tif
+done
+
+aws s3 sync $WORKSPACE/assaydev/montages/$BATCH_ID s3://$BUCKET/projects/$PROJECT_NAME/workspace/assaydev/montages/$BATCH_ID/
+#+end_src
+
+*** Transfer identification sections from assay.cpp to analysis
+#+begin_src shell
+aws s3 cp $WORKSPACE/pipelines/${BATCH_ID}/analysis.cppipe D:\\pipelines\${BATCH_ID}\analysis.cppipe
+#+end_src
+Copy the "Identify*" steps and adjust data to avoid red crosses (by changing directory name and channel names).
+
+*** Transfer identification sections to analysis
+#+begin_src bash
+aws s3 cp D:\\pipelines\${BATCH_ID}\analysis.cppipe s3://${BUCKET}/projects/${PROJECT_NAME}/workspace/pipelines/${BATCH_ID}/analysis.cppipe
+# aws s3 cp D:\\pipelines\2023_08_02_Batch5\analysis.cppipe s3://imaging-platform-ssf/projects/2022_09_07_New_phenotypic_dye_testing_CDoT_Broad/workspace/pipelines/2023_08_02_Batch5/analysis.cppipe
+#+end_src
+** Delete EBS volume
+In the AWS console EC2 => under Elastic Block Store Volumes => select the external volume. Actions => Detach volume or Force detach volume. Actions => Delete volume.
+#+begin_src shell
+# aws ec2 detach_volume
+
+# Get attached volume from instanceid
+function volume_from_instance_device_names
+# instance_name device_name
+get_instance_data_from_name $argv[1] | jq '.BlockDeviceMappings | map(select(.DeviceName=="'"$argv[2]"'")) |.[] | .Ebs.VolumeId' | tr -d '"'
+end
+#+end_src
+
+Now use the helper functions to detach and delete the volume
+#+begin_src shell
+set VOLUME_ID (volume_from_instance_device_names "ALAN_Windows" "/dev/sdf")
+echo detach-volume $AWS_PROFILE --volume-id $VOLUME_ID | xargs aws ec2 && echo delete-volume $AWS_PROFILE --volume-id $VOLUME_ID | xargs aws ec2
+#+end_src
+
+** Analysis (DCP)
+
+#+begin_src shell
+ssh ubuntu@(name_to_dns "ALAN_DCP")
+AWS_PROFILE="--profile imaging-platform" #Leave empty if only using one profile
+USER="ALAN" # for Instance names
+BUCKET="imaging-platform-ssf"
+PROJECT_NAME="2022_09_07_New_phenotypic_dye_testing_CDoT_Broad"
+BATCH_ID="2023_08_02_Batch5"
+KEY="amunozgo_cimini"
+cd ~/efs/$PROJECT_NAME/workspace/software/Distributed-CellProfiler
+sed -Ei "s/^SSH_KEY_NAME = .*/SSH_KEY_NAME = '$KEY.pem'/" config.py
+sed -Ei "s/^APP_NAME = .*/APP_NAME = '$PROJECT_NAME\_Analysis'/" config.py
+sed -Ei "s/^SQS_MESSAGE_VISIBILITY = .*/SQS_MESSAGE_VISIBILITY = 120 * 60/" config.py
+sed -Ei "s/^EXPECTED_NUMBER_FILES = .*/EXPECTED_NUMBER_FILES = 8/" config.py
+sed -Ei "s/^#?Make(\S+)Jobs(.*)/#Make\1\Jobs\2/" run_batch_general.py
+sed -Ei "s/^# *MakeAnalysisJobs(.*)/MakeAnalysisJobs\1/" run_batch_general.py
+#+end_src
+
+#+begin_src shell
+
+python3 run.py setup; python3 run_batch_general.py && python3 run.py startCluster files/analysisFleet.json && python run.py monitor files/$PROJECT_NAME\_AnalysisSpotFleetRequestId.json
+# python run.py monitor files/$PROJECT_NAME\_AnalysisSpotFleetRequestId.json
+# aws s3 --profile imaging-platform ls s3://$BUCKET/projects/$PROJECT_NAME/$BATCH_ID/images/ | cut -f29 -d' '| tr -s '_' | cut -f1 -d'_' | sed '/^\s*$/d' | sed 's/.*/"&"/g' |tr '\n' ','
+#+end_src
+
+** Backend generation (DCP or Backends?)
+Calculate Analysis size
+#+begin_src shell
+
+set BACKENDS_VOL_SIZE (calculate_size $WORKSPACE/analysis/$BATCH_ID | sed -E 's/(.+)/ceil(\1 * 2)/g' | math)
+set ATTACH_VOLUME_ARGS "attach-volume --device xvdf --instance-id $(name_to_instance $BACKENDS_NAME)'' --volume-id "
+#+end_src
+
+#+begin_src  shell
+SET BACKENDS_VOL_ID ( echo "$AWS_PROFILE create-volume --availability-zone $(name_to_azone $BACKENDS_NAME) --size $BACKENDS_VOL_SIZE --tag-specifications ResourceType=volume,Tags=[{Key=User,Value=$USERNAME},{Key=Name,Value="$BACKENDS_NAME"}]" | xargs aws ec2  | get_volume_id ) sed -E "s/^/$ATTACH_VOLUME_ARGS/" $BACKENDS_VOL_ID | xargs aws ec2
+# Automated volume attachment is not working for some reason
+#+end_src
+#+begin_src shell
+# Get core count
+set BACKEND_DNS (name_to_dns "ALAN_Backend")
+ssh ubuntu@$BACKEND_DNS 'mkdir -p ~/.aws'
+# copy credentials to the remote server
+# If you only have one set, do scp ~/.aws/credentials ubuntu@$BACKEND_DNS ~/.aws/credentials. In this case I have two sets, imaging-platform being the ones I need there
+sed -e '1,/imaging-platform/d' ~/.aws/credentials | tac | gsed -e '$a[default]' | tac | ssh ubuntu@$BACKEND_DNS 'cat > ~/.aws/credentials'
+
+
+# And let's move on to the server
+ssh ubuntu@(name_to_dns "ALAN_Backend")
+
+mkdir ~/ebs_tmp
+
+# TODO check cases where it is not mounted
+# VOLUMENAME=$(lsblk | tr -s '  ' | grep "\/$" | cut -f1 -d' ' | sed 's/[[:punct:]]//g')
+VOLUMENAME="xvdf"
+
+# Check it exists
+sudo file -s /dev/$VOLUMENAME
+
+# If the previous command does not return "Linux rev 1.0 ext4 filesystem data", format it
+sudo mkfs -t ext4 /dev/$VOLUMENAME
+
+# Mount it and give it all the permission
+sudo mount /dev/$VOLUMENAME /home/ubuntu/ebs_tmp
+sudo chmod 777 ~/ebs_tmp/
+#+end_src
+
+
+#+begin_src bash
+KEY="amunozgo_cimini"
+AWS_PROFILE="--profile imaging-platform" #Leave empty if only using one profile
+BUCKET="imaging-platform-ssf"
+PROJECT_NAME="2022_09_07_New_phenotypic_dye_testing_CDoT_Broad"
+BATCH_ID="2023_08_02_Batch5"
+MAXPROCS=3 # Copy the CPU count obtained in the last "get_instance_data_from_name..."
+WORKSPACE="s3://$BUCKET/projects/$PROJECT_NAME/workspace"
+mkdir -p ~/ebs_tmp/${PROJECT_NAME}/workspace/software
+cd ~/ebs_tmp/${PROJECT_NAME}/workspace/software
+if [ -d pycytominer ]; then rm -rf pycytominer; fi
+git clone https://github.com/cytomining/pycytominer.git
+cd pycytominer
+python3 -m pip install -e .
+#+end_src
+
+#+RESULTS:
+
+#+begin_src shell
+mkdir -p ~/ebs_tmp/${PROJECT_NAME}/workspace/scratch/${BATCH_ID}/
+PLATES=$(readlink -f ~/ebs_tmp/${PROJECT_NAME}/workspace/scratch/${BATCH_ID}/plates_to_process.txt)
+aws s3 ls $WORKSPACE/analysis/${BATCH_ID}/ |cut -d " " -f29 | cut -d "/" -f1 >> ${PLATES}
+
+cd ~/ebs_tmp/${PROJECT_NAME}/workspace/software/pycytominer/
+mkdir -p  ../../log/${BATCH_ID}/
+parallel \
+--max-procs ${MAXPROCS} \
+--ungroup \
+--eta \
+--joblog ../../log/${BATCH_ID}/collate.log \
+--results ../../log/${BATCH_ID}/collate \
+--files \
+--keep-order \
+python3 pycytominer/cyto_utils/collate_cmd.py ${BATCH_ID} pycytominer/cyto_utils/database_config/ingest_config.ini {1} \
+--tmp-dir ~/ebs_tmp \
+--aws-remote=s3://${BUCKET}/projects/${PROJECT_NAME}/workspace :::: ${PLATES}
+#+end_src
+** Create metadata
+SSH into the Backend machine
+
+#+begin_src shell
+set PLATEMAPS_DIR "metadata/$BATCH_ID/platemap"
+mkdir -p $PLATEMAPS_DIR
+set PLATEMAP_FILE "metadata/$BATCH_ID/barcode_platemap.csv"
+echo Assay_Plate_Barcode,Plate_Map_Name > $PLATEMAP_FILE
+
+echo "$AWS_PROFILE $WORKSPACE/analysis/$BATCH_ID/" | xargs aws s3 ls | cut -d " " -f29
+
+
+# Generate metadata tsv (.txt) and fill it by copying from a previous batch
+set TEMPLATE_BATCH_ID (echo $AWS_PROFILE "$WORKSPACE/analysis/" | xargs aws s3 ls | cut -d " " -f29 | tr -d '/' | sed -n 2p)
+
+set PLATEMAP_NAME (echo $AWS_PROFILE "$WORKSPACE/metadata/$TEMPLATE_BATCH_ID/platemap/"  | xargs aws s3 ls | grep .txt | tr -s ' '  | cut -f4 -d' ' | cut -f1 -d'.')
+
+for PLATE in (echo "$AWS_PROFILE $WORKSPACE/analysis/$BATCH_ID/" | xargs aws s3 ls | cut -d " " -f29 | tr -d '/');
+    printf "%s,%s" $PLATE $PLATEMAP_NAME >> $PLATEMAP_FILE
+end
+
+echo "$AWS_PROFILE $WORKSPACE/metadata/$TEMPLATE_BATCH_ID/platemap/$PLATEMAP_NAME.txt ./metadata/$BATCH_ID/platemap/$PLATEMAP_NAME.txt" | xargs aws s3 cp
+
+echo "$AWS_PROFILE --exclude **/.* ./metadata/$BATCH_ID/ $WORKSPACE/metadata/$BATCH_ID" | xargs aws s3 sync
+
+#+end_src
+
+** Profiles generation
+#+begin_src bash
+ORG=broadinstitute
+DATA=2022_09_07_New_phenotypic_dye_testing_CDoT_Broad
+USER=afermg
+CONFIG_FILE=config_batch5
+BUCKET="imaging-platform-ssf"
+PROJECT_NAME="2022_09_07_New_phenotypic_dye_testing_CDoT_Broad"
+BATCH_ID="2023_08_02_Batch5"
+mkdir -p ~/work/projects/${PROJECT_NAME}/workspace/{backend,software}
+aws s3 sync s3://${BUCKET}/projects/${PROJECT_NAME}/workspace/backend/${BATCH_ID} ~/work/projects/${PROJECT_NAME}/workspace/backend/${BATCH_ID} --exclude="*" --include="*.csv"
+git config --global user.email "amunozgo@broadinstitute.org"
+git config --global user.name "Alán F. Muñoz"
+cd ~/work/projects/${PROJECT_NAME}/workspace/software
+
+git clone https://github.com/${ORG}/${DATA}.git
+cd ${DATA}
+cp profiling-recipe/environment.yml .
+conda env create --force --file environment.yml
+#+end_src
+
+Copy profiling template and auto-edit it
+From the root of a profiling project
+#+begin_src shell
+set BATCH_ID "2023_08_02_Batch5"
+set TEMPLATE_FILE "profiling-recipe/config_template.yml";
+set AUTOCONF_NAME "$BATCH_ID.yml";
+set CONFIG_FILE "config_files/$AUTOCONF_NAME";
+set PROFILE_DIR "../../backend";
+
+# Copy and remove batch section of template
+sed '0,/^batch:/!d' $TEMPLATE_FILE | tac | tail -n +3 | tac > $CONFIG_FILE
+
+for BATCH in $PROFILE_DIR/*/;
+    echo "---" >> $CONFIG_FILE;
+    echo "batch: $(basename $BATCH)" >> $CONFIG_FILE;
+    echo "plates:" >> $CONFIG_FILE;
+    for PLATE in $BATCH/*;
+        echo $PLATE
+        echo "  - name: $(basename $PLATE)" >> $CONFIG_FILE;
+        echo "    process: true" >> $CONFIG_FILE;
+    end
+    echo "process: true" >> $CONFIG_FILE;
+end
+
+sed -i "s/<PIPELINE NAME>/analysis/" $CONFIG_FILE
+
+# Move metadata inside workspace
+set META_DIR "metadata/platemaps/$BATCH_ID/platemap"
+set META_FILENAME (ls "$META_DIR")
+set META_FULLPATH "$META_DIR/$META_FILENAME"
+
+sed -i "s/Plate Barcode/Plate_Map_Name/" $META_FULLPATH
+sed -i "s/Well Position/well_position/" $META_FULLPATH
+sed -i "s/BRD ID/broad_sample/" $META_FULLPATH
+
+set MERGE_COL $(head -n 1 $META_FULLPATH | sed 's/\t/\n/g' | grep -i broad)
+
+sed -i "s/<Column to merge on>/$MERGE_COL/" $CONFIG_FILE
+sed -i "s/<metadata file name>/$META_FILE/" $CONFIG_FILE
+
+# Deactivate these steps
+for STEP in quality_control aggregate annotate normalize_negcon feature_select_negcon;
+            # echo $STEP
+            sed -i "/$STEP:/{N;s/perform: true/perform: false/;}" $CONFIG_FILE
+end
+
+# And these, following the handbook
+sed -i "s/gct: false/gct: true/" $CONFIG_FILE
+sed -i "s/gct: false/gct: true/" $CONFIG_FILE
+sed -i "/external :/{N;s/perform: true/perform: false/;}" $CONFIG_FILE
+#+end_src
+
+Copy profiles into the backend folder and compress.
+#+begin_src shell
+mkdir -p profiles/$BATCH_ID
+find ../../backend/$BATCH_ID/ -type f -name "*.csv" -exec profiling-recipe/scripts/csv2gz.py {} \;
+rsync -arzv --include="*/" --include="*.gz" --exclude "*" ../../backend/$BATCH_ID/ profiles/$BATCH_ID/
+#+end_src
+
+Run the profiling pipeline
+#+begin_src
+poetry run python profiling-recipe/profiles/profiling_pipeline.py  --config $CONFIG_FILE
+#+end_src
+** TODO cleanup all instances
