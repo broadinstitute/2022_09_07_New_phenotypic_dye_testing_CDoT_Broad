@@ -22,6 +22,7 @@ set AWS_PROFILE "--profile imaging-platform" #Leave empty if only using one prof
 set BUCKET "imaging-platform-ssf"
 set PROJECT_NAME "2022_09_07_New_phenotypic_dye_testing_CDoT_Broad"
 set BATCH_ID "2023_08_02_Batch5"
+set WORKSPACE "s3://$BUCKET/projects/$PROJECT_NAME/workspace/"
 #+end_src
 
 Instance variables
@@ -335,7 +336,7 @@ sudo apt install imagemagick
 # Do it from DCP
 IMAGES="$WORKSPACE/assaydev/$BATCH"
 cd $WORKSPACE
-aws s3 sync s3://$BUCKET/projects/$PROJECT_NAME/workspace/assaydev/$BATCH_ID/ $IMAGES/
+aws s3 sync $WORKSPACE/assaydev/$BATCH_ID/ $IMAGES/
 
 mkdir -p $WORKSPACE/assaydev/montages/$BATCH_ID
 PLATES=$(ls $BATCH_ID | cut -f1 -d' ' | cut -f1 -d'-' | uniq)
@@ -348,7 +349,7 @@ aws s3 sync $WORKSPACE/assaydev/montages/$BATCH_ID s3://$BUCKET/projects/$PROJEC
 
 *** Transfer identification sections from assay.cpp to analysis
 #+begin_src shell
-aws s3 cp s3://${BUCKET}/projects/${PROJECT_NAME}/workspace/pipelines/${BATCH_ID}/analysis.cppipe D:\\pipelines\${BATCH_ID}\analysis.cppipe
+aws s3 cp $WORKSPACE/pipelines/${BATCH_ID}/analysis.cppipe D:\\pipelines\${BATCH_ID}\analysis.cppipe
 #+end_src
 Copy the "Identify*" steps and adjust data to avoid red crosses (by changing directory name and channel names).
 
@@ -405,7 +406,7 @@ python3 run.py setup; python3 run_batch_general.py && python3 run.py startCluste
 Calculate Analysis size
 #+begin_src shell
 
-set BACKENDS_VOL_SIZE (calculate_size s3://$BUCKET/projects/$PROJECT_NAME/workspace/analysis/$BATCH_ID | sed -E 's/(.+)/ceil(\1 * 2)/g' | math)
+set BACKENDS_VOL_SIZE (calculate_size $WORKSPACE/analysis/$BATCH_ID | sed -E 's/(.+)/ceil(\1 * 2)/g' | math)
 set ATTACH_VOLUME_ARGS "attach-volume --device xvdf --instance-id $(name_to_instance $BACKENDS_NAME)'' --volume-id "
 #+end_src
 
@@ -450,6 +451,7 @@ BUCKET="imaging-platform-ssf"
 PROJECT_NAME="2022_09_07_New_phenotypic_dye_testing_CDoT_Broad"
 BATCH_ID="2023_08_02_Batch5"
 MAXPROCS=3 # Copy the CPU count obtained in the last "get_instance_data_from_name..."
+WORKSPACE="s3://$BUCKET/projects/$PROJECT_NAME/workspace"
 mkdir -p ~/ebs_tmp/${PROJECT_NAME}/workspace/software
 cd ~/ebs_tmp/${PROJECT_NAME}/workspace/software
 if [ -d pycytominer ]; then rm -rf pycytominer; fi
@@ -463,7 +465,7 @@ python3 -m pip install -e .
 #+begin_src shell
 mkdir -p ~/ebs_tmp/${PROJECT_NAME}/workspace/scratch/${BATCH_ID}/
 PLATES=$(readlink -f ~/ebs_tmp/${PROJECT_NAME}/workspace/scratch/${BATCH_ID}/plates_to_process.txt)
-aws s3 ls s3://${BUCKET}/projects/${PROJECT_NAME}/workspace/analysis/${BATCH_ID}/ |cut -d " " -f29 | cut -d "/" -f1 >> ${PLATES}
+aws s3 ls $WORKSPACE/analysis/${BATCH_ID}/ |cut -d " " -f29 | cut -d "/" -f1 >> ${PLATES}
 
 cd ~/ebs_tmp/${PROJECT_NAME}/workspace/software/pycytominer/
 mkdir -p  ../../log/${BATCH_ID}/
@@ -488,22 +490,106 @@ mkdir -p $PLATEMAPS_DIR
 set PLATEMAP_FILE "metadata/$BATCH_ID/barcode_platemap.csv"
 echo Assay_Plate_Barcode,Plate_Map_Name > $PLATEMAP_FILE
 
-echo $AWS_PROFILE s3://$BUCKET/projects/$PROJECT_NAME/workspace/analysis/$BATCH_ID/ | xargs aws s3 ls | cut -d " " -f29
+echo "$AWS_PROFILE $WORKSPACE/analysis/$BATCH_ID/" | xargs aws s3 ls | cut -d " " -f29
 
 
 # Generate metadata tsv (.txt) and fill it by copying from a previous batch
-set TEMPLATE_BATCH_ID (echo $AWS_PROFILE "s3://$BUCKET/projects/$PROJECT_NAME/workspace/analysis/" | xargs aws s3 ls | cut -d " " -f29 | tr -d '/' | sed -n 2p)
+set TEMPLATE_BATCH_ID (echo $AWS_PROFILE "$WORKSPACE/analysis/" | xargs aws s3 ls | cut -d " " -f29 | tr -d '/' | sed -n 2p)
 
-set PLATEMAP_NAME (echo $AWS_PROFILE "s3://$BUCKET/projects/$PROJECT_NAME/workspace/metadata/$TEMPLATE_BATCH_ID/platemap/"  | xargs aws s3 ls | grep .txt | tr -s ' '  | cut -f4 -d' ' | cut -f1 -d'.')
+set PLATEMAP_NAME (echo $AWS_PROFILE "$WORKSPACE/metadata/$TEMPLATE_BATCH_ID/platemap/"  | xargs aws s3 ls | grep .txt | tr -s ' '  | cut -f4 -d' ' | cut -f1 -d'.')
 
-for PLATE in (echo "$AWS_PROFILE s3://$BUCKET/projects/$PROJECT_NAME/workspace/analysis/$BATCH_ID/" | xargs aws s3 ls | cut -d " " -f29 | tr -d '/');
+for PLATE in (echo "$AWS_PROFILE $WORKSPACE/analysis/$BATCH_ID/" | xargs aws s3 ls | cut -d " " -f29 | tr -d '/');
     printf "%s,%s" $PLATE $PLATEMAP_NAME >> $PLATEMAP_FILE
 end
 
-echo "$AWS_PROFILE s3://$BUCKET/projects/$PROJECT_NAME/workspace/metadata/$TEMPLATE_BATCH_ID/platemap/$PLATEMAP_NAME.txt ./metadata/$BATCH_ID/platemap/$PLATEMAP_NAME.txt" | xargs aws s3 cp
+echo "$AWS_PROFILE $WORKSPACE/metadata/$TEMPLATE_BATCH_ID/platemap/$PLATEMAP_NAME.txt ./metadata/$BATCH_ID/platemap/$PLATEMAP_NAME.txt" | xargs aws s3 cp
 
-# echo "$AWS_PROFILE metadata/$BATCH_ID s3://$BUCKET/projects/$PROJECT_NAME/workspace/metadata/$BATCH_ID" | aws s3 sync
+echo "$AWS_PROFILE --exclude **/.* ./metadata/$BATCH_ID/ $WORKSPACE/metadata/$BATCH_ID" | xargs aws s3 sync
+
 #+end_src
 
 ** Profiles generation
+#+begin_src bash
+ORG=broadinstitute
+DATA=2022_09_07_New_phenotypic_dye_testing_CDoT_Broad
+USER=afermg
+CONFIG_FILE=config_batch5
+BUCKET="imaging-platform-ssf"
+PROJECT_NAME="2022_09_07_New_phenotypic_dye_testing_CDoT_Broad"
+BATCH_ID="2023_08_02_Batch5"
+mkdir -p ~/work/projects/${PROJECT_NAME}/workspace/{backend,software}
+aws s3 sync s3://${BUCKET}/projects/${PROJECT_NAME}/workspace/backend/${BATCH_ID} ~/work/projects/${PROJECT_NAME}/workspace/backend/${BATCH_ID} --exclude="*" --include="*.csv"
+git config --global user.email "amunozgo@broadinstitute.org"
+git config --global user.name "Alán F. Muñoz"
+cd ~/work/projects/${PROJECT_NAME}/workspace/software
+
+git clone https://github.com/${ORG}/${DATA}.git
+cd ${DATA}
+cp profiling-recipe/environment.yml .
+conda env create --force --file environment.yml
+#+end_src
+
+Copy profiling template and auto-edit it
+From the root of a profiling project
+#+begin_src shell
+set BATCH_ID "2023_08_02_Batch5"
+set TEMPLATE_FILE "profiling-recipe/config_template.yml";
+set AUTOCONF_NAME "$BATCH_ID.yml";
+set CONFIG_FILE "config_files/$AUTOCONF_NAME";
+set PROFILE_DIR "../../backend";
+
+# Copy and remove batch section of template
+sed '0,/^batch:/!d' $TEMPLATE_FILE | tac | tail -n +3 | tac > $CONFIG_FILE
+
+for BATCH in $PROFILE_DIR/*/;
+    echo "---" >> $CONFIG_FILE;
+    echo "batch: $(basename $BATCH)" >> $CONFIG_FILE;
+    echo "plates:" >> $CONFIG_FILE;
+    for PLATE in $BATCH/*;
+        echo $PLATE
+        echo "  - name: $(basename $PLATE)" >> $CONFIG_FILE;
+        echo "    process: true" >> $CONFIG_FILE;
+    end
+    echo "process: true" >> $CONFIG_FILE;
+end
+
+sed -i "s/<PIPELINE NAME>/analysis/" $CONFIG_FILE
+
+# Move metadata inside workspace
+set META_DIR "metadata/platemaps/$BATCH_ID/platemap"
+set META_FILENAME (ls "$META_DIR")
+set META_FULLPATH "$META_DIR/$META_FILENAME"
+
+sed -i "s/Plate Barcode/Plate_Map_Name/" $META_FULLPATH
+sed -i "s/Well Position/well_position/" $META_FULLPATH
+sed -i "s/BRD ID/broad_sample/" $META_FULLPATH
+
+set MERGE_COL $(head -n 1 $META_FULLPATH | sed 's/\t/\n/g' | grep -i broad)
+
+sed -i "s/<Column to merge on>/$MERGE_COL/" $CONFIG_FILE
+sed -i "s/<metadata file name>/$META_FILE/" $CONFIG_FILE
+
+# Deactivate these steps
+for STEP in quality_control aggregate annotate normalize_negcon feature_select_negcon;
+            # echo $STEP
+            sed -i "/$STEP:/{N;s/perform: true/perform: false/;}" $CONFIG_FILE
+end
+
+# And these, following the handbook
+sed -i "s/gct: false/gct: true/" $CONFIG_FILE
+sed -i "s/gct: false/gct: true/" $CONFIG_FILE
+sed -i "/external :/{N;s/perform: true/perform: false/;}" $CONFIG_FILE
+#+end_src
+
+Copy profiles into the backend folder and compress.
+#+begin_src shell
+mkdir -p profiles/$BATCH_ID
+find ../../backend/$BATCH_ID/ -type f -name "*.csv" -exec profiling-recipe/scripts/csv2gz.py {} \;
+rsync -arzv --include="*/" --include="*.gz" --exclude "*" ../../backend/$BATCH_ID/ profiles/$BATCH_ID/
+#+end_src
+
+Run the profiling pipeline
+#+begin_src
+poetry run python profiling-recipe/profiles/profiling_pipeline.py  --config $CONFIG_FILE
+#+end_src
 ** TODO cleanup all instances
