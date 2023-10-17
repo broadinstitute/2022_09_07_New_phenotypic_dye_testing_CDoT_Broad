@@ -1,0 +1,5 @@
+outs:
+- md5: b0cca4f771225bb9edde9d89bf7b9c7f
+  size: 7981632
+  hash: md5
+  path: BR00122249_normalized_negcon.csv.gz
