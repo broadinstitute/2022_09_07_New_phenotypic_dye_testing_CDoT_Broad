@@ -577,13 +577,12 @@ sed -i "s/<Column to merge on>/$MERGE_COL/" $CONFIG_FILE
 sed -i "s/<metadata file name>/$META_FILE/" $CONFIG_FILE
 
 # Deactivate these steps
-for STEP in quality_control aggregate annotate normalize_negcon feature_select_negcon;
+for STEP in quality_control aggregate annotate;
             # echo $STEP
             sed -i "/$STEP:/{N;s/perform: true/perform: false/;}" $CONFIG_FILE
 end
 
 # And these, following the handbook
-sed -i "s/gct: false/gct: true/" $CONFIG_FILE
 sed -i "s/gct: false/gct: true/" $CONFIG_FILE
 sed -i "/external :/{N;s/perform: true/perform: false/;}" $CONFIG_FILE
 #+end_src
@@ -616,6 +615,7 @@ Upload to s3
 parallel aws s3 sync {1} s3://$BUCKET/projects/$PROJECT_NAME/workspace/1 ::: config_files gct profiles quality_control
 #+end_src
 
+**
 ** TODO cleanup all instances
 #+begin_src shell
 stop_instance (name_to_instance "ALAN_Backend")
