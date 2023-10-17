@@ -16,12 +16,12 @@ aggregate:
     - Count
     - Intensity
 annotate:
-  perform: true
+  perform: false
   well_column: Metadata_Well
   external :
     perform: false
-    file:
-    merge_column: broad_sample
+    file: 
+    merge_column: broad_sample broad_sample
 normalize:
   perform: true
   method: mad_robustize
@@ -46,7 +46,7 @@ feature_select:
     - drop_na_columns
     - blocklist
 feature_select_negcon:
-  perform: false
+  perform: true
   features: infer
   level: batch
   gct: true
@@ -71,6 +71,6 @@ options:
 ---
 batch: 2023_08_02_Batch5
 plates:
-  - name: BR00122249            #
+  - name: BR00122249
     process: true
 process: true
