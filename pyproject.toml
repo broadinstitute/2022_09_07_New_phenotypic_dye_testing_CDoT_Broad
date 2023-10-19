@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "2022_09_07_New_phenotypic_dye_testing_CDoT_Broad"
+name = "chroma_live"
 version = "0.1.0"
 description = ""
 authors = ["Alan"]
@@ -19,14 +19,12 @@ matplotlib = "^3.7.3"
 seaborn = "^0.12.2"
 broad-babel = "^0.1.4"
 pycytominer = "^0.2.0"
-# pycytominer = {git = "https://github.com/cytomining/pycytominer", rev = "36241269c4293c24484986568ca16b2d7eb9e808"}
-copairs = {git = "https://github.com/cytomining/copairs", rev = "880f22a551bd897896d148a0b07baa99d981c6a9"}
-
+copairs = {git = "https://github.com/cytomining/copairs", tag = "v0.3.0"}
 numpy = "1.23.1"
 
 
 [tool.poetry.group.dev.dependencies]
-jupytext = "^1.15.0"
+jupytext = "^1.15.2"
 ipdb = "^0.13.13"
 isort = "^5.12.0"
 black = "^23.7.0"

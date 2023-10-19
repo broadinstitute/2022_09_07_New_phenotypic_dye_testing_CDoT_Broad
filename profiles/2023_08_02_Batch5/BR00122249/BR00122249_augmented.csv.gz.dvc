@@ -1,0 +1,5 @@
+outs:
+- md5: 6d1a0caed716ef309220324bacd6e9db
+  size: 8113328
+  hash: md5
+  path: BR00122249_augmented.csv.gz
