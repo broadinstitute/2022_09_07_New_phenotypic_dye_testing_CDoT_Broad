@@ -1,0 +1,76 @@
+#+title: Pipeline
+#+PROPERTY: header-args:shell
+
+Fetch the data and run the command-based CellProfiler analyses
+
+
+* Main pipeline
+:PROPERTIES:
+:header-args:shell: :session none :results output :cache yes
+:END:
+
+** Upload data to AWS
+#+begin_src bash :results output :session
+echo "test"
+#+end_src
+
+#+RESULTS:
+: test
+
+#+begin_src bash :results output :session tmp
+set BUCKET "imaging-platform"
+set PROJECT_NAME "2022_09_07_New_phenotypic_dye_testing_CDoT_Broad"
+set BATCH_ID "2023_08_02_Batch5"
+set CPG_IDENTIFIER "chromalive_pilot"
+
+echo $fish_pid
+
+echo "test"
+#+end_src
+
+#+RESULTS:
+#+begin_example
+set BUCKET "imaging-platform"
+set PROJECT_NAME "2022_09_07_New_phenotypic_dye_testing_CDoT_Broad"
+set BATCH_ID "2023_08_02_Batch5"
+set CPG_IDENTIFIER "chromalive_pilot"
+
+fish_pid
+[?2004l53999
+
+echo "test"
+[?2004ltest
+#+end_example
+
+
+
+
+
+
+
+
+#+begin_src shell :session none :results output raw verbatim
+
+for i in (find '/Volumes/imaging_analysis/2022_09_07_New_phenotypic_dye_testing_CDoT_Broad/Phenix 2 - Live Timepoints' -maxdepth 1 -type d | grep '3$' | grep -v 2245);
+         echo $i;
+# aws s3 sync "$i" "s3://$BUCKET/projects/$PROJECT_NAME/$BATCH_ID/images/$(basename $i | sed 's/\ //g' | sed 's/\-/_/g')";
+end
+
+#+end_src
+
+#+RESULTS[6b6f84655c5cee38a9246f909f0936ce6974f951]:
+/Volumes/imaging_analysis/2022_09_07_New_phenotypic_dye_testing_CDoT_Broad/Phenix 2 - Live Timepoints/BR00122248__2023-03-24T12_49_58-Measurement3
+/Volumes/imaging_analysis/2022_09_07_New_phenotypic_dye_testing_CDoT_Broad/Phenix 2 - Live Timepoints/BR00122249__2023-03-24T12_14_34-Measurement 3
+
+
+
+** Create CSVs
+#+begin_src shell :results output raw verbatim
+
+for plate in (aws s3 ls s3://$BUCKET/projects/$PROJECT_NAME/$BATCH_ID/);
+             echo $plate
+    # tail -n 500 ~/Users/${USERNAME}/Downloads/Index.idx.xml|grep ChannelName|sort -u
+end
+#    Images/Index.idx.xml ./$PLATE/Index.idx.xml
+#+end_src
+
