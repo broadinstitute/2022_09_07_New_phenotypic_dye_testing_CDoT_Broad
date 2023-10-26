@@ -103,7 +103,7 @@ moa_dfs = {
 
 # df = rename_id_col(dfs[name])
 # df["Metadata_Count_Cells_norm"] = df["Metadata_Count_Cells"] / 100
-for name in ("CellPainting", "Saguaro"):
+for name in ("CellPainting", "Saguaro", "MitoBrilliant"):
     moa_dfs["cp_saguaro"] = pd.merge(
         rename_id_col(moa_dfs["cp_saguaro"]),
         average_cell_count(dfs[name], suffix=name),

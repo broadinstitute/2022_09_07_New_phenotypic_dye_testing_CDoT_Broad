@@ -25,6 +25,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import plotly.io as pio
+import seaborn as sns
 from plotly.subplots import make_subplots
 
 # %% [markdown]
@@ -82,17 +83,26 @@ quick_save(actin_fig, "actin_fig.html")
 # %%
 combined_box_plot = go.Figure()
 
-field_name = (
-    ("average_precision_std", "Standard CellPainting dyes"),
-    ("average_precision_act", "Phalloidin 400LS"),
-    ("average_precision_mito", "MitoBrilliant"),
-    ("mean_average_precision_batch3", "Saguaro + CellPainting"),
-    ("mean_average_precision_batch5", "Saguaro"),
+
+map_cc_name = (
+    (
+        "average_precision_std",
+        "Metadata_Count_Cells_Std_norm",
+        "Standard CellPainting dyes",
+    ),
+    ("average_precision_act", "Metadata_Count_Cells_act_norm", "Phalloidin 400LS"),
+    ("average_precision_mito", "Metadata_Count_Cells_Saguaro_norm", "MitoBrilliant"),
+    (
+        "mean_average_precision_batch3",
+        "Metadata_Count_Cells_CellPainting_norm",
+        "Saguaro + CellPainting",
+    ),
+    ("mean_average_precision_batch5", "Metadata_Count_Cells_Saguaro_norm", "Saguaro"),
 )
-for field, name in field_name:
+for map_field, _, name in map_cc_name:
     combined_box_plot.add_trace(
         go.Box(
-            y=combined_moa_cellcount_df[field],
+            y=combined_moa_cellcount_df[map_field],
             name=name,
             boxpoints="all",
             hovertext=combined_moa_cellcount_df["MoA"]
@@ -114,7 +124,6 @@ quick_save(combined_box_plot, "combined_box_plot.html")
 # Plot cell count vs mAP for each dye
 # %%
 
-import seaborn as sns
 
 # %% [markdown]
 # ### mean average precision values -  moa
@@ -123,23 +132,7 @@ import seaborn as sns
 
 # %%
 scatter_plot = go.Figure()
-
-map_field_name = (
-    (
-        "average_precision_std",
-        "Metadata_Count_Cells_Std_norm",
-        "Standard CellPainting dyes",
-    ),
-    ("average_precision_act", "Metadata_Count_Cells_act_norm", "Phalloidin 400LS"),
-    (
-        "mean_average_precision_batch3",
-        "Metadata_Count_Cells_CellPainting_norm",
-        "Saguaro + CellPainting",
-    ),
-    ("mean_average_precision_batch5", "Metadata_Count_Cells_Saguaro_norm", "Saguaro"),
-    # ("average_precision_mito", "MitoBrilliant"),
-)
-for map_field, cc_field, name in map_field_name:
+for map_field, cc_field, name in map_cc_name:
     scatter_plot.add_trace(
         go.Scatter(
             # x=combined_moa_cellcount_df["MoA"],
@@ -172,20 +165,37 @@ quick_save(scatter_plot, "scatter_cc_vs_map.html")
 
 # %%
 dfs = []
-for map_field, cc_field, name in map_field_name:
+for map_field, cc_field, name in map_cc_name:
     tmp_df = pd.DataFrame()
-    tmp_df["Cell Count"] = df[cc_field]
-    tmp_df["Mean Average Precision"] = df[map_field]
+    tmp_df["Average Cell Count"] = combined_moa_cellcount_df[cc_field]
+    tmp_df["Mean Average Precision"] = combined_moa_cellcount_df[map_field]
     tmp_df["Dye Set"] = name
     dfs.append(tmp_df)
 dye_sets_df = pd.concat(dfs, axis=0)
 
-ax = sns.histplot(dye_sets_df, x="Cell Count", hue="Dye Set", element="step")
-ax.spines[["right", "top"]].set_visible(False)
-sns.move_legend(ax, loc="upper left")
+ax = sns.stripplot(
+    data=dye_sets_df,
+    x="Average Cell Count",
+    y="Dye Set",
+    hue="Dye Set",
+    # dodge=True
+    alpha=0.5,
+    # element="step",
+    # alpha=0.1,
+    # stat="proportion",
+    # common_norm=False,
+)
+# ax.spines[["right", "top"]].set_visible(False)
+sns.despine(top=True, right=True)
+# sns.move_legend(ax, loc="upper left")
 import matplotlib.pyplot as plt
 
-plt.savefig(figs_dir / "cell_count_distribution.png", dpi=200)
+for item in ax.get_xticklabels():
+    item.set_rotation(45)
+
+# plt.savefig(figs_dir / "cell_count_distribution.png", dpi=200)
+plt.tight_layout()
+plt.savefig(figs_dir / "cell_count_strip.png", dpi=200)
 plt.close()
 # %%
 fig = go.Figure()
