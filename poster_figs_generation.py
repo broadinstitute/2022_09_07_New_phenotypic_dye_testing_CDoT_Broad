@@ -95,7 +95,7 @@ map_cc_name = (
     (
         "mean_average_precision_batch3",
         "Metadata_Count_Cells_CellPainting_norm",
-        "Saguaro + CellPainting",
+        "Standard CellPainting followed by Saguaro",
     ),
     ("mean_average_precision_batch5", "Metadata_Count_Cells_Saguaro_norm", "Saguaro"),
 )
