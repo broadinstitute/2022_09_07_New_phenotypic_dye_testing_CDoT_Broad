@@ -1,0 +1,49 @@
+#+title: Planning
+
+* Main task
+Use the data from the Batch with Nuclear and mitochondrial dyes and digital phase.
+There are two ways to do it:
+
+** Mito channel (+optional digital phase) -> Nuclear mask
+The output is a mask (nuclei mask)
+*** Pros
+  - Simpler
+  - Convolutional Neural Networks (CNNs) are a viable and straightforward option
+*** Cons
+  - Less information is encoded
+** Mito channel (+optional digital phase) -> Nuclear fluorescence
+Pixel-to-pixel translation
+Most famous model is Pix2Pix (https://github.com/phillipi/pix2pix)
+The output is an entire image (synthetic nuclei dye)
+*** Pros
+- Alex has experience on this task
+- Levin has interest on this
+*** Cons
+- More challenging task
+- We still need to segment nuclei using this synthetic channel
+
+** Basic plan
+- We should aim for a Minimal Viable Product (MVP)
+- Iterate on this result (model) until satisfied with segmentation
+
+*** Split data into training, testing and validation
+*** Use DGX due to its GPUs
+*** WAIT Pick benchmarks
+
+** Tasks
+- ALAN [Undergoing/Done] Change the type of plots to something like this - https://seaborn.pydata.org/generated/seaborn.boxenplot.html
+- ALAN [Done] Label needs to be edited - Saguaro + Standard Cell Painting dyes -> Standard Cell Painting dyes followed by Saguaro
+- TODO Suganya [ ] Rerun batch5 with Bright field
+- TODO ALAN [Know how to do] Calculate the threshold values or q-values - this comes along with the copairs package
+- [] mAP calculation was done with respect to controls. mAP calculation with respect to the treatments ?
+- Which figures to regenerate?
+  - TODO Suganya [ ] Scatterplot of compounds in addition to MoA
+  - TODO Alan  [ ] q value plot
+  - TODO Alan [ ] Boxenplot of mAPs for Saguaro dyes with/without DNA channel
+- TODO Alan [] Boxenplot comparison of all 5 dye sets (mAP)
+  - WAIT [Code done] Calculate mAP without nuclear data
+  - WAIT ALAN [Shantanu said it is optional / can be done] Noise removal -> PCA
+    - Scatterplot of resultant PCA
+- Process early time points
+  - Train virtual staining model BF ->Hoecsht
+  - Process data in the same way as Batch 5
