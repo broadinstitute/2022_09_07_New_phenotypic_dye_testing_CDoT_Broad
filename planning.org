@@ -35,10 +35,10 @@ The output is an entire image (synthetic nuclei dye)
 *** DONE ALAN [Done] Label needs to be edited - Saguaro + Standard Cell Painting dyes -> Standard Cell Painting dyes followed by Saguaro
 *** TODO Suganya [ ] Rerun batch5 with Bright field
 *** TODO ALAN [Know how to do] Calculate the threshold values or q-values - this comes along with the copairs package
-*** TODO Suganya [ ] mAP calculation was done with respect to controls. mAP calculation with respect to the treatments ?
+*** TODO Suganya [ ] mAP calculation was done with respect to controls. mAP calculation with respect to the treatments?
 *** Which figures to regenerate?
 **** TODO Suganya [ ] Scatterplot of compounds in addition to MoA
-**** TODO Alan  [ ] q value plot
+**** TODO Alan [ ] q value plot
 **** TODO Alan [ ] Boxenplot of mAPs for Saguaro dyes with/without DNA channel
 *** TODO Alan [ ] Boxenplot comparison of all 5 dye sets (mAP)
 **** WAIT ALAN [Code done] Calculate mAP without nuclear data
