@@ -47,3 +47,23 @@ The output is an entire image (synthetic nuclei dye)
 *** WAIT Process early time points
 **** Train virtual staining model BF ->Hoecsht
 **** Process data in the same way as Batch 5
+
+* <2023-11-20 Mon>  Meeting points
+
+** Understand conclusions that can be drawn from the poster
+    Interpretation of analysis results beyond conclusions related to mAP: what else can we conclude?
+    - Lipids are better retrieved
+    - Fewer channels may make it easier
+    - Cell count effect is comparable to Cell Painting and others
+
+    How is the mAP metric calculated? Was it published?
+    - It's under review to be published before the holidays
+
+** Metric to test for MoA prediction quality
+    Timepoints: seeing phenotypic changes over time
+    Comparing vs BF
+
+
+** Cell pose segmentation approach
+
+    Training on cells stained with Hoechst, to then segment cells without Hoechst
