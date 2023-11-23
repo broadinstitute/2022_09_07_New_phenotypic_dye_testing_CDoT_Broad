@@ -33,7 +33,7 @@ The output is an entire image (synthetic nuclei dye)
 ** Tasks
 *** DONE ALAN [Undergoing/Done] Change the type of plots to something like this - https://seaborn.pydata.org/generated/seaborn.boxenplot.html
 *** DONE ALAN [Done] Label needs to be edited - Saguaro + Standard Cell Painting dyes -> Standard Cell Painting dyes followed by Saguaro
-*** TODO Suganya [ ] Rerun batch5 with Bright field
+*** DONE Suganya [Done] Rerun batch5 with Bright field
 *** TODO ALAN [Know how to do] Calculate the threshold values or q-values - this comes along with the copairs package
 *** TODO Suganya [ ] mAP calculation was done with respect to controls. mAP calculation with respect to the treatments?
 *** Which figures to regenerate?
