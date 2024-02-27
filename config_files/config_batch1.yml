@@ -29,7 +29,7 @@ normalize:
   mad_robustize_fudge_factor: 0
   image_features: true
 normalize_negcon:
-  perform: false
+  perform: true
   method: mad_robustize
   features: infer
   mad_robustize_fudge_factor: 0
@@ -46,10 +46,10 @@ feature_select:
     - drop_na_columns
     - blocklist
 feature_select_negcon:
-  perform: false
+  perform: true
   features: infer
   level: batch
-  gct: false
+  gct: true
   image_features: true
   operations:
     - variance_threshold
