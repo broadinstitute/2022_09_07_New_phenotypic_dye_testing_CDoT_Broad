@@ -38,7 +38,7 @@ feature_select:
   perform: true
   features: infer
   level: batch
-  gct: true 
+  gct: true
   image_features: true
   operations:
     - variance_threshold
@@ -74,5 +74,3 @@ plates:
   - name: BR00122248
     process: true
 process: true
-
-
