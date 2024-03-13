@@ -1,4 +1,4 @@
-plate_map_name	well_position	control_type	broad_sample	mg_per_ml	mmoles_per_liter	solvent	broad_sample	BRD with batch	Common Name	MoA
+plate_map_name	well_position	control_type	broad_sample	mg_per_ml	mmoles_per_liter	solvent	BRD ID	BRD with batch	Common Name	MoA
 S-C-7314-04-CMP-001	A01		BRD-K62391742-001-19-9	4.342195	5	DMSO	K62391742	BRD-K62391742-001-03-0	venetoclax	BCL inhibitor
 S-C-7314-04-CMP-001	A02		BRD-K19477839-001-10-9	1.79704	5	DMSO	K19477839	BRD-K19477839-001-07-6	SGX523	hepatocyte growth factor receptor inhibitor
 S-C-7314-04-CMP-001	A03		BRD-K54759182-003-09-8	1.659515	5	DMSO	K54759182	BRD-K54759182-003-08-0	dosulepin	tricyclic antidepressant
