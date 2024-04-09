@@ -1,0 +1,11 @@
+name: profiling
+dependencies:
+- conda-forge::python=3.8.13
+- conda-forge::pandas=1.4.3
+- conda-forge::pyyaml=6.0
+- conda-forge::plotly=5.10.0
+- conda-forge::dvc-s3=2.19.0
+- conda-forge::python-kaleido=0.2.1
+- pip
+- pip:
+  - git+https://github.com/cytomining/pycytominer@0a0ff1543af9a2d4d0e823dfe75ca437572d3894
